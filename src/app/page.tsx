@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
   BoltIcon,
@@ -10,6 +10,7 @@ import {
   SparklesIcon,
   TrophyIcon,
 } from "@heroicons/react/24/outline";
+import Link from "next/link";
 import { nanoid } from "nanoid";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -82,14 +83,12 @@ export default function Home() {
   const [mode, setMode] = useState<"walk" | "metro" | "drive">("metro");
   const [status, setStatus] = useState("Waiting for GPS…");
   const [profileReady, setProfileReady] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [authName, setAuthName] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const passportRef = useRef<HTMLDivElement | null>(null);
 
-  const signup = useMutation(api.auth.signup);
   const login = useMutation(api.auth.login);
   const logout = useMutation(api.auth.logout);
   const ensureProfile = useMutation(api.passport.ensureProfile);
@@ -107,10 +106,6 @@ export default function Home() {
       setStatus("Session expired, using guest profile");
     }
   }, [session, sessionToken]);
-
-  useEffect(() => {
-    setAuthMessage("");
-  }, [authMode]);
 
   const passport = useQuery(
     api.passport.getPassport,
@@ -255,31 +250,6 @@ export default function Home() {
     }
   };
 
-  const handleSignup = async () => {
-    if (!authEmail || !authPassword) {
-      setAuthMessage("Email and password required");
-      return;
-    }
-    setAuthLoading(true);
-    setAuthMessage("");
-    try {
-      const res = await signup({
-        email: authEmail,
-        password: authPassword,
-        name: authName || authEmail.split("@")[0],
-      });
-      localStorage.setItem("air-session-token", res.token);
-      setSessionToken(res.token);
-      setAuthMessage("Account created and synced ✅");
-      setStatus("Signed in via Convex auth");
-      setAuthPassword("");
-    } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : "Signup failed");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
   const handleLogin = async () => {
     if (!authEmail || !authPassword) {
       setAuthMessage("Email and password required");
@@ -370,6 +340,14 @@ export default function Home() {
     ];
   }, [passport?.profile?.points, passport?.profile?.streak, risk.level]);
 
+  const isSignedIn = Boolean(session?.user);
+
+  const scrollToPassport = () => {
+    if (passportRef.current) {
+      passportRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10 md:px-10 lg:px-14">
       <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -404,17 +382,22 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="card flex flex-col gap-4 rounded-2xl p-5 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
+      <section className="card flex flex-col gap-5 rounded-2xl p-5 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Account</p>
+          <h2 className="text-lg font-semibold text-slate-900">
+            {isSignedIn ? "You’re synced. Keep exploring." : "Sign in to keep your passport synced"}
+          </h2>
           <p className="text-sm text-slate-700">
-            {session?.user
-              ? `Signed in as ${session.user.email}`
-              : "Guest mode. Sign in to sync your passport via Convex (air component)."}
+            {isSignedIn
+              ? `Signed in as ${session?.user?.email}. Your streaks and badges stay backed up.`
+              : "Guest mode is active. Sign in to save streaks and rewards across devices."}
           </p>
-          <p className="text-[11px] text-slate-500">
-            Data stored in Convex self-hosted; WAQI + OpenAQ power live readings.
-          </p>
+          <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+            <span className="pill">Convex-auth sessions</span>
+            <span className="pill">Guest fallback</span>
+            <span className="pill">No marketing spam</span>
+          </div>
           {authMessage && (
             <p
               className={`text-xs ${/fail|error|invalid/i.test(authMessage) ? "text-rose-700" : "text-emerald-700"}`}
@@ -424,65 +407,77 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex w-full flex-wrap gap-2 md:w-auto md:items-center">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="email"
-              placeholder="you@email.com"
-              value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-              className="w-full min-w-[210px] rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
-            />
-            {authMode === "signup" && (
-              <input
-                type="text"
-                placeholder="Display name"
-                value={authName}
-                onChange={(e) => setAuthName(e.target.value)}
-                className="w-full min-w-[180px] rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
-              />
-            )}
-            <input
-              type="password"
-              placeholder="Password"
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              className="w-full min-w-[170px] rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
-            />
+        {isSignedIn ? (
+          <div className="flex w-full flex-wrap items-center gap-2 text-sm md:max-w-[480px]">
+            <button
+              onClick={scrollToPassport}
+              className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            >
+              Open dashboard
+            </button>
+            <button
+              onClick={handleLogout}
+              className="rounded-full border border-rose-200 px-4 py-2 font-semibold text-rose-600 transition hover:bg-rose-50"
+              disabled={authLoading}
+            >
+              Sign out
+            </button>
           </div>
-          <div className="flex flex-wrap gap-2 text-sm">
-            <button
-              onClick={authMode === "login" ? handleLogin : handleSignup}
-              className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
-              disabled={authLoading}
-            >
-              {authLoading
-                ? "Working…"
-                : authMode === "login"
-                  ? "Sign in"
-                  : "Create account"}
-            </button>
-            <button
-              onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}
-              className="rounded-full border border-slate-200 px-4 py-2 font-semibold text-slate-700 transition hover:bg-white"
-              disabled={authLoading}
-            >
-              {authMode === "login" ? "Need an account?" : "Have an account?"}
-            </button>
-            {session?.user && (
+        ) : (
+          <div className="flex w-full flex-col gap-3 md:max-w-[480px]">
+            <div className="grid w-full gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                Email
+                <input
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@email.com"
+                  value={authEmail}
+                  onChange={(e) => {
+                    setAuthEmail(e.target.value);
+                    setAuthMessage("");
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-slate-400 focus:ring-1 focus:ring-slate-200"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                Password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => {
+                    setAuthPassword(e.target.value);
+                    setAuthMessage("");
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-slate-400 focus:ring-1 focus:ring-slate-200"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
               <button
-                onClick={handleLogout}
-                className="rounded-full border border-rose-200 px-4 py-2 font-semibold text-rose-600 transition hover:bg-rose-50"
+                onClick={handleLogin}
+                className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
                 disabled={authLoading}
               >
-                Sign out
+                {authLoading ? "Working…" : "Sign in"}
               </button>
-            )}
+              <Link
+                href="/register"
+                className="rounded-full border border-slate-200 px-4 py-2 font-semibold text-slate-700 transition hover:bg-white"
+              >
+                Create account
+              </Link>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Registration now lives on its own page so you can focus on a calm, single-task flow.
+            </p>
           </div>
-        </div>
+        )}
       </section>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3" ref={passportRef} id="passport">
         <div className="card col-span-1 rounded-2xl p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase tracking-[0.15em] text-slate-500">
