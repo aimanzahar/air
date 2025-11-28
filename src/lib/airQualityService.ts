@@ -21,15 +21,9 @@ const debounceTimers = new Map<string, NodeJS.Timeout>();
 
 class AirQualityService {
   private config = {
-    waqi: {
-      baseUrl: 'https://api.waqi.info',
-      token: process.env.NEXT_PUBLIC_WAQI_TOKEN || 'ccecee1eead62e81d67bf17540fe1ebb148346b7',
+    doe: {
+      baseUrl: 'https://eqms.doe.gov.my/api3/publicmapproxy',
       cacheTimeout: DEFAULT_CACHE_TIMEOUT
-    },
-    openaq: {
-      baseUrl: 'https://api.openaq.org/v2',
-      cacheTimeout: DEFAULT_CACHE_TIMEOUT,
-      maxRadius: 25000 // 25km in meters
     }
   };
 
@@ -49,7 +43,7 @@ class AirQualityService {
   }
 
   private setCachedData<T>(key: string, data: T, customTimeout?: number): void {
-    const timeout = customTimeout || this.config.waqi.cacheTimeout;
+    const timeout = customTimeout || this.config.doe.cacheTimeout;
     cache.set(key, {
       data,
       timestamp: Date.now(),
@@ -130,13 +124,13 @@ class AirQualityService {
     };
   }
 
-  // Fetch from WAQI API
-  private async fetchWAQI(mode: 'radius' | 'bounds', params: any): Promise<AirQualityStation[]> {
-    const cacheKey = this.getCacheKey('waqi', { mode, ...params });
+  // Fetch from DOE API
+  private async fetchDOE(mode: 'radius' | 'bounds' | 'all', params: any): Promise<AirQualityStation[]> {
+    const cacheKey = this.getCacheKey('doe', { mode, ...params });
     const cached = this.getCachedData<AirQualityStation[]>(cacheKey);
     if (cached) return cached;
 
-    const url = '/api/waqi';
+    const url = '/api/doe';
     const body = { mode, ...params };
 
     try {
@@ -146,70 +140,31 @@ class AirQualityService {
         body: JSON.stringify(body)
       });
 
-      if (!res.ok) throw new Error(`WAQI API error: ${res.status}`);
-      
+      if (!res.ok) throw new Error(`DOE API error: ${res.status}`);
+
       const data = await res.json();
       const stations = data.data || [];
-      
-      this.setCachedData(cacheKey, stations, this.config.waqi.cacheTimeout);
+
+      this.setCachedData(cacheKey, stations, this.config.doe.cacheTimeout);
       return stations;
     } catch (error) {
-      console.error('WAQI fetch error:', error);
-      return [];
-    }
-  }
-
-  // Fetch from OpenAQ API
-  private async fetchOpenAQ(mode: 'radius' | 'bounds', params: any): Promise<AirQualityStation[]> {
-    const cacheKey = this.getCacheKey('openaq', { mode, ...params });
-    const cached = this.getCachedData<AirQualityStation[]>(cacheKey);
-    if (cached) return cached;
-
-    const url = '/api/openaq';
-    const body = { mode, ...params };
-
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      if (!res.ok) throw new Error(`OpenAQ API error: ${res.status}`);
-      
-      const data = await res.json();
-      const stations = data.data || [];
-      
-      this.setCachedData(cacheKey, stations, this.config.openaq.cacheTimeout);
-      return stations;
-    } catch (error) {
-      console.error('OpenAQ fetch error:', error);
+      console.error('DOE fetch error:', error);
       return [];
     }
   }
 
   // Get single station data (backward compatibility)
-  async getSingleStation(lat: number, lng: number, source?: 'waqi' | 'openaq'): Promise<AirQualityStation | null> {
+  async getSingleStation(lat: number, lng: number, source?: 'doe'): Promise<AirQualityStation | null> {
     const cacheKey = this.getCacheKey('single', { lat, lng, source });
     const cached = this.getCachedData<AirQualityStation>(cacheKey);
     if (cached) return cached;
 
     try {
-      // Try WAQI first, then OpenAQ
-      if (source !== 'openaq') {
-        const waqiData = await this.fetchWAQI('radius', { lat, lng, radius: 0.1, limit: 1 });
-        if (waqiData.length > 0) {
-          this.setCachedData(cacheKey, waqiData[0]);
-          return waqiData[0];
-        }
-      }
-
-      if (source !== 'waqi') {
-        const openaqData = await this.fetchOpenAQ('radius', { lat, lng, radius: 0.1, limit: 1 });
-        if (openaqData.length > 0) {
-          this.setCachedData(cacheKey, openaqData[0]);
-          return openaqData[0];
-        }
+      // Use DOE API
+      const doeData = await this.fetchDOE('radius', { lat, lng, radius: 0.1, limit: 1 });
+      if (doeData.length > 0) {
+        this.setCachedData(cacheKey, doeData[0]);
+        return doeData[0];
       }
 
       return null;
@@ -225,18 +180,18 @@ class AirQualityService {
     lng: number,
     radiusKm: number = 100,
     options: {
-      source?: 'waqi' | 'openaq' | 'all';
+      source?: 'doe';
       limit?: number;
       debounce?: boolean;
     } = {}
   ): Promise<SearchResponse> {
-    const { source = 'all', limit = 100, debounce = false } = options;
+    const { source = 'doe', limit = 100, debounce = false } = options;
     const cacheKey = this.getCacheKey('radius', { lat, lng, radiusKm, source, limit });
-    
+
     if (debounce) {
       return this.debounce(cacheKey, () => this._fetchAirQualityByRadius(lat, lng, radiusKm, { source, limit }));
     }
-    
+
     return this._fetchAirQualityByRadius(lat, lng, radiusKm, { source, limit });
   }
 
@@ -244,27 +199,17 @@ class AirQualityService {
     lat: number,
     lng: number,
     radiusKm: number,
-    options: { source: 'waqi' | 'openaq' | 'all'; limit: number }
+    options: { source: 'doe'; limit: number }
   ): Promise<SearchResponse> {
     try {
       const stations: AirQualityStation[] = [];
-      
-      // Fetch from selected sources
-      if (options.source === 'waqi' || options.source === 'all') {
-        const waqiStations = await this.fetchWAQI('radius', { lat, lng, radius: radiusKm, limit: options.limit });
-        stations.push(...waqiStations);
-      }
 
-      if (options.source === 'openaq' || options.source === 'all') {
-        const openaqStations = await this.fetchOpenAQ('radius', { lat, lng, radius: radiusKm, limit: options.limit });
-        stations.push(...openaqStations);
-      }
+      // Fetch from DOE API
+      const doeStations = await this.fetchDOE('radius', { lat, lng, radius: radiusKm, limit: options.limit });
+      stations.push(...doeStations);
 
-      // Remove duplicates (same coordinates within 100m)
-      const uniqueStations = this.deduplicateStations(stations);
-      
       // Sort by distance and limit
-      const sortedStations = uniqueStations
+      const sortedStations = stations
         .map(station => ({
           ...station,
           distance: this.calculateDistance(lat, lng, station.lat, station.lng)
@@ -295,39 +240,29 @@ class AirQualityService {
   async fetchAllStationsInArea(
     bounds: BoundingBox,
     options: {
-      source?: 'waqi' | 'openaq' | 'all';
+      source?: 'doe';
       limit?: number;
       page?: number;
     } = {}
   ): Promise<SearchResponse> {
-    const { source = 'all', limit = 100, page = 1 } = options;
-    
+    const { source = 'doe', limit = 100, page = 1 } = options;
+
     try {
       const stations: AirQualityStation[] = [];
-      
-      // Fetch from selected sources
-      if (source === 'waqi' || source === 'all') {
-        const waqiStations = await this.fetchWAQI('bounds', { bounds, limit, page });
-        stations.push(...waqiStations);
-      }
 
-      if (source === 'openaq' || source === 'all') {
-        const openaqStations = await this.fetchOpenAQ('bounds', { bounds, limit, page });
-        stations.push(...openaqStations);
-      }
-
-      // Remove duplicates
-      const uniqueStations = this.deduplicateStations(stations);
+      // Fetch from DOE API
+      const doeStations = await this.fetchDOE('bounds', { bounds, limit, page });
+      stations.push(...doeStations);
 
       // Calculate summary
       const centerLat = (bounds.north + bounds.south) / 2;
       const centerLng = (bounds.east + bounds.west) / 2;
       const radiusKm = this.calculateDistance(centerLat, centerLng, bounds.north, bounds.east);
-      const summary = this.calculateAreaSummary(centerLat, centerLng, radiusKm, uniqueStations);
+      const summary = this.calculateAreaSummary(centerLat, centerLng, radiusKm, stations);
 
       return {
         success: true,
-        data: uniqueStations,
+        data: stations,
         summary
       };
     } catch (error) {
@@ -394,31 +329,7 @@ class AirQualityService {
     return clusters;
   }
 
-  // Remove duplicate stations
-  private deduplicateStations(stations: AirQualityStation[]): AirQualityStation[] {
-    const seen = new Map<string, AirQualityStation>();
-    const THRESHOLD_KM = 0.1; // 100 meters
-
-    for (const station of stations) {
-      const key = `${station.lat.toFixed(4)}-${station.lng.toFixed(4)}`;
-      const existing = seen.get(key);
-
-      if (!existing) {
-        seen.set(key, station);
-      } else {
-        // Merge data if we have measurements from both sources
-        if (station.source !== existing.source && (station.pm25 || station.no2 || station.co)) {
-          existing.pm25 = existing.pm25 || station.pm25;
-          existing.no2 = existing.no2 || station.no2;
-          existing.co = existing.co || station.co;
-          existing.aqi = existing.aqi || station.aqi;
-        }
-      }
-    }
-
-    return Array.from(seen.values());
-  }
-
+  
   // Calculate area summary
   private calculateAreaSummary(
     centerLat: number,

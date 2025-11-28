@@ -49,7 +49,7 @@ type AirData = {
   co: number | null;
   unit?: string;
   lastUpdated?: string | null;
-  source?: "waqi" | "openaq";
+  source?: "waqi" | "openaq" | "doe";
 };
 
 type RiskLevel = "low" | "moderate" | "high" | "loading";
@@ -331,43 +331,34 @@ export default function Home() {
   const fetchAir = async (lat: number, lon: number) => {
     setLoadingAir(true);
     try {
-      let data: AirData | null = null;
+      const res = await fetch("/api/doe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat, lon }),
+      });
+      const data = await res.json();
 
-      try {
-        const waqiRes = await fetch("/api/waqi", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat, lon }),
+      if (res.ok && data.data && data.data.length > 0) {
+        // Get the nearest station
+        const station = data.data[0];
+        setAir({
+          location: station.location,
+          city: station.city,
+          country: station.country,
+          pm25: station.pm25,
+          no2: station.no2,
+          co: station.co,
+          unit: "µg/m³",
+          lastUpdated: station.lastUpdated,
+          source: "doe",
         });
-        const waqiData = await waqiRes.json();
-        if (waqiRes.ok && !waqiData?.error) {
-          data = { ...waqiData, source: "waqi" };
-        }
-      } catch (err) {
-        console.warn("WAQI fetch failed", err);
-      }
-
-      if (!data) {
-        const res = await fetch("/api/openaq", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat, lon }),
-        });
-        const oaData = await res.json();
-        if (res.ok && !oaData?.error) {
-          data = { ...oaData, source: "openaq" };
-        }
-      }
-
-      if (data) {
-        setAir(data);
-        setStatus(`Live data from ${data.source === "waqi" ? "WAQI" : "OpenAQ"}`);
+        setStatus(`Live data from DOE Malaysia`);
       } else {
         setStatus("Air data unavailable — retry or move to better signal");
       }
     } catch (error) {
-      console.error(error);
-      setStatus("OpenAQ error — retry or change network");
+      console.error("DOE API error", error);
+      setStatus("DOE API error — retry or change network");
     } finally {
       setLoadingAir(false);
     }
@@ -574,7 +565,7 @@ export default function Home() {
           </span>
           <span className="pill inline-flex items-center gap-2 transition-all duration-300 hover:scale-105">
             <SparklesIcon className="h-4 w-4" />
-            Source: {air?.source === "waqi" ? "WAQI" : "OpenAQ"}
+            Source: {air?.source === "doe" ? "DOE Malaysia" : air?.source === "waqi" ? "WAQI" : "OpenAQ"}
           </span>
           {isTrackingEnabled && (
             <span className="pill inline-flex items-center gap-2 bg-emerald-50 text-emerald-700">

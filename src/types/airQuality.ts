@@ -8,7 +8,7 @@ export interface AirQualityData {
   co: number | null;
   unit?: string;
   lastUpdated?: string | null;
-  source?: "waqi" | "openaq";
+  source?: "waqi" | "openaq" | "doe";
 }
 
 // Station data structure
@@ -24,9 +24,15 @@ export interface AirQualityStation {
   pm25?: number;
   no2?: number;
   co?: number;
+  o3?: number;
+  so2?: number;
   lastUpdated?: string;
   distance?: number; // Distance from reference point in km
-  source?: "waqi" | "openaq";
+  source?: "waqi" | "openaq" | "doe";
+  class?: string; // Air quality class (Good, Moderate, etc.)
+  category?: string; // Station category (Urban, Rural, etc.)
+  state?: string; // State name
+  region?: string; // Region name
 }
 
 // Bounding box for area searches
@@ -66,13 +72,13 @@ export interface RadiusSearchRequest {
   lng: number;
   radius?: number; // in kilometers, default 100
   limit?: number; // maximum stations to return
-  source?: "waqi" | "openaq" | "all";
+  source?: "doe";
 }
 
 export interface BoundingBoxSearchRequest {
   bounds: BoundingBox;
   limit?: number;
-  source?: "waqi" | "openaq" | "all";
+  source?: "doe";
 }
 
 export interface SearchResponse {
@@ -91,12 +97,7 @@ export interface CacheEntry<T> {
 
 // API configuration
 export interface APIConfig {
-  waqi: {
-    token: string;
-    baseUrl: string;
-    cacheTimeout: number; // in milliseconds
-  };
-  openaq: {
+  doe: {
     baseUrl: string;
     cacheTimeout: number;
     maxRadius: number; // maximum supported radius in meters
