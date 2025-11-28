@@ -104,7 +104,7 @@ export default function RegisterPage() {
             <h2 className="font-display text-2xl text-slate-900">Start a clean-air streak</h2>
           </div>
           <Link
-            href="/"
+            href="/dashboard"
             className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 underline-offset-4 hover:text-slate-900 hover:underline"
           >
             <ArrowLeftIcon className="h-4 w-4" />
@@ -182,10 +182,10 @@ export default function RegisterPage() {
         <div className="rounded-xl bg-white/80 p-4 text-xs text-slate-600 shadow-sm">
           Already have an account?{" "}
           <Link
-            href="/"
+            href="/dashboard"
             className="font-semibold text-slate-900 underline-offset-4 hover:underline"
           >
-            Sign in on the main dashboard
+            Sign in on the dashboard
           </Link>
           .
         </div>

@@ -47,7 +47,6 @@ export const ensureProfile = mutation({
       : undefined;
     const existing = await ctx.db
       .query("profiles")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
       .unique();
 
@@ -97,7 +96,6 @@ export const logExposure = mutation({
     const profile =
       (await ctx.db
         .query("profiles")
-        // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
         .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
         .unique()) ??
       (await ctx.db.get(
@@ -176,7 +174,6 @@ export const getPassport = query({
   handler: async (ctx, args) => {
     const profile = await ctx.db
       .query("profiles")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
       .unique();
 
@@ -184,7 +181,6 @@ export const getPassport = query({
     const exposures = profile
       ? await ctx.db
           .query("exposures")
-          // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
           .withIndex("by_profile", (q) => q.eq("profileId", profile._id))
           .order("desc")
           .take(limit)
@@ -193,7 +189,6 @@ export const getPassport = query({
     const weekly = profile
       ? await ctx.db
           .query("exposures")
-          // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
           .withIndex("by_profile", (q) => q.eq("profileId", profile._id))
           .order("desc")
           .take(50)
@@ -217,14 +212,12 @@ export const insights = query({
   handler: async (ctx, args) => {
     const profile = await ctx.db
       .query("profiles")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
       .unique();
     if (!profile) return null;
 
     const logs = await ctx.db
       .query("exposures")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_profile", (q) => q.eq("profileId", profile._id))
       .order("desc")
       .take(30);

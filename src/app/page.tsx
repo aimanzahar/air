@@ -1,763 +1,272 @@
-"use client";
-
-import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowPathIcon,
+  ArrowLongRightIcon,
   BoltIcon,
-  ClockIcon,
-  ExclamationTriangleIcon,
+  GlobeAsiaAustraliaIcon,
+  HeartIcon,
   MapPinIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   TrophyIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { nanoid } from "nanoid";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
 
-type AirData = {
-  location: string;
-  city?: string;
-  country?: string;
-  pm25: number | null;
-  no2: number | null;
-  co: number | null;
-  unit?: string;
-  lastUpdated?: string | null;
-  source?: "waqi" | "openaq";
-};
+const pillars = [
+  {
+    title: "Cut exposure on KL commutes",
+    body: "Live PM2.5 and NO₂ trends keep you out of the worst pockets between Bangsar, PJ, and the city core.",
+    icon: <MapPinIcon className="h-6 w-6 text-sky-600" />,
+  },
+  {
+    title: "Rewards for smart choices",
+    body: "Earn streaks and badges when you swap to rail, pick shaded routes, or avoid peak smog hours.",
+    icon: <TrophyIcon className="h-6 w-6 text-amber-600" />,
+  },
+  {
+    title: "Health-first design",
+    body: "Micro-coaching, indoor day nudges, and mask reminders tuned for haze season and heat alerts.",
+    icon: <HeartIcon className="h-6 w-6 text-emerald-600" />,
+  },
+];
 
-type RiskLevel = "low" | "moderate" | "high" | "loading";
+const steps = [
+  {
+    label: "01",
+    title: "Check today’s air pulse",
+    body: "We blend WAQI + OpenAQ for a Malaysian-centered AQ snapshot with risk scoring.",
+  },
+  {
+    label: "02",
+    title: "Plan the cleanest route",
+    body: "Pick metro over car for crosstown, choose green corridors, or delay until peaks ease.",
+  },
+  {
+    label: "03",
+    title: "Log and keep a streak",
+    body: "Save commutes, grow points, and watch your weekly averages drift cleaner.",
+  },
+];
 
-const fallback = {
-  lat: 3.139,
-  lon: 101.6869,
-  label: "Kuala Lumpur (fallback)",
-};
-
-const scoreAir = (air: AirData | null): {
-  score: number;
-  level: RiskLevel;
-  narrative: string;
-} => {
-  if (!air) return { score: 0, level: "loading", narrative: "Pulling data" };
-  const pm = air.pm25 ?? 30;
-  const no2 = air.no2 ?? 20;
-  const co = air.co ?? 0.5;
-  const pmPenalty = Math.min(pm / 2, 60);
-  const noPenalty = Math.min(no2 / 2.5, 30);
-  const coPenalty = Math.min(co * 8, 10);
-  const score = Math.max(0, Math.round(100 - pmPenalty - noPenalty - coPenalty));
-  let level: "low" | "moderate" | "high";
-  let narrative = "Air is stable. Keep an eye on rush hours.";
-  if (score >= 75) {
-    level = "low";
-    narrative = "Clean window now—perfect for outdoor errands.";
-  } else if (score >= 45) {
-    level = "moderate";
-    narrative = "Quality is mixed. Prefer shaded or transit routes.";
-  } else {
-    level = "high";
-    narrative = "Exposure risk is high. Shift plans indoors if you can.";
-  }
-  return { score, level, narrative };
-};
-
-const formatValue = (v: number | null | undefined) =>
-  v === null || v === undefined ? "—" : v.toFixed(1);
-
-const formatTime = (iso?: string | null) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return `${d.toLocaleDateString()} • ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-};
-
-export default function Home() {
-  const [userKey, setUserKey] = useState<string | null>(null);
-  const [guestKey, setGuestKey] = useState<string | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [coords, setCoords] = useState(fallback);
-  const [air, setAir] = useState<AirData | null>(null);
-  const [loadingAir, setLoadingAir] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [mode, setMode] = useState<"walk" | "metro" | "drive">("metro");
-  const [status, setStatus] = useState("Waiting for GPS…");
-  const [profileReady, setProfileReady] = useState(false);
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authMessage, setAuthMessage] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-  const passportRef = useRef<HTMLDivElement | null>(null);
-
-  const login = useMutation(api.auth.login);
-  const logout = useMutation(api.auth.logout);
-  const ensureProfile = useMutation(api.passport.ensureProfile);
-  const logExposure = useMutation(api.passport.logExposure);
-
-  const session = useQuery(
-    api.auth.session,
-    sessionToken ? { token: sessionToken } : "skip",
-  );
-
-  useEffect(() => {
-    if (session === null && sessionToken) {
-      localStorage.removeItem("air-session-token");
-      setSessionToken(null);
-      setStatus("Session expired, using guest profile");
-    }
-  }, [session, sessionToken]);
-
-  const passport = useQuery(
-    api.passport.getPassport,
-    userKey ? { userKey, limit: 6 } : "skip",
-  );
-  const insight = useQuery(
-    api.passport.insights,
-    userKey ? { userKey } : "skip",
-  );
-
-  const risk = useMemo(() => scoreAir(air), [air]);
-
-  useEffect(() => {
-    const storedSession = localStorage.getItem("air-session-token");
-    if (storedSession) setSessionToken(storedSession);
-
-    const existing = localStorage.getItem("air-passport-key");
-    if (existing) {
-      setGuestKey(existing);
-    } else {
-      const newKey = `guest-${nanoid(10)}`;
-      localStorage.setItem("air-passport-key", newKey);
-      setGuestKey(newKey);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (session?.userKey) {
-      setUserKey(session.userKey);
-      localStorage.setItem("air-passport-key", session.userKey);
-    } else if (guestKey) {
-      setUserKey(guestKey);
-    }
-  }, [session?.userKey, guestKey]);
-
-  useEffect(() => {
-    setProfileReady(false);
-  }, [userKey]);
-
-  useEffect(() => {
-    if (!userKey || profileReady) return;
-    ensureProfile({ userKey, nickname: session?.user?.name ?? undefined }).finally(
-      () => setProfileReady(true),
-    );
-  }, [userKey, ensureProfile, profileReady, session?.user?.name]);
-
-  useEffect(() => {
-    if (!userKey) return;
-    if (!("geolocation" in navigator)) {
-      setStatus("GPS unavailable, using fallback city");
-      setCoords(fallback);
-      fetchAir(fallback.lat, fallback.lon);
-      return;
-    }
-    setStatus("Grabbing your air station…");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const c = {
-          lat: Number(pos.coords.latitude.toFixed(4)),
-          lon: Number(pos.coords.longitude.toFixed(4)),
-          label: "Your location",
-        };
-        setCoords(c);
-        fetchAir(c.lat, c.lon);
-        setStatus("Live location locked");
-      },
-      () => {
-        setStatus("Using fallback city");
-        setCoords(fallback);
-        fetchAir(fallback.lat, fallback.lon);
-      },
-      { enableHighAccuracy: true, timeout: 8000 },
-    );
-  }, [userKey]);
-
-  const fetchAir = async (lat: number, lon: number) => {
-    setLoadingAir(true);
-    try {
-      let data: AirData | null = null;
-
-      try {
-        const waqiRes = await fetch("/api/waqi", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat, lon }),
-        });
-        const waqiData = await waqiRes.json();
-        if (waqiRes.ok && !waqiData?.error) {
-          data = { ...waqiData, source: "waqi" };
-        }
-      } catch (err) {
-        console.warn("WAQI fetch failed", err);
-      }
-
-      if (!data) {
-        const res = await fetch("/api/openaq", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat, lon }),
-        });
-        const oaData = await res.json();
-        if (res.ok && !oaData?.error) {
-          data = { ...oaData, source: "openaq" };
-        }
-      }
-
-      if (data) {
-        setAir(data);
-        setStatus(`Live data from ${data.source === "waqi" ? "WAQI" : "OpenAQ"}`);
-      } else {
-        setStatus("Air data unavailable — retry or move to better signal");
-      }
-    } catch (error) {
-      console.error(error);
-      setStatus("OpenAQ error — retry or change network");
-    } finally {
-      setLoadingAir(false);
-    }
-  };
-
-  const handleLog = async () => {
-    if (!userKey || !air) return;
-    setSaving(true);
-    try {
-      await logExposure({
-        userKey,
-        lat: coords.lat,
-        lon: coords.lon,
-        locationName: air.city
-          ? `${air.location} · ${air.city}`
-          : air.location ?? "Unknown",
-        pm25: air.pm25 ?? undefined,
-        no2: air.no2 ?? undefined,
-        co: air.co ?? undefined,
-        mode,
-      });
-      setStatus("Saved commute, streak updated");
-      // Refresh air data for freshness
-      fetchAir(coords.lat, coords.lon);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    if (!authEmail || !authPassword) {
-      setAuthMessage("Email and password required");
-      return;
-    }
-    setAuthLoading(true);
-    setAuthMessage("");
-    try {
-      const res = await login({ email: authEmail, password: authPassword });
-      localStorage.setItem("air-session-token", res.token);
-      setSessionToken(res.token);
-      setAuthMessage("Signed in and synced ✅");
-      setStatus("Signed in via Convex auth");
-      setAuthPassword("");
-    } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : "Login failed");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    setAuthLoading(true);
-    setAuthMessage("");
-    try {
-      if (sessionToken) await logout({ token: sessionToken });
-    } finally {
-      localStorage.removeItem("air-session-token");
-      setSessionToken(null);
-      if (guestKey) {
-        setUserKey(guestKey);
-      } else {
-        const fallbackKey = `guest-${nanoid(8)}`;
-        localStorage.setItem("air-passport-key", fallbackKey);
-        setGuestKey(fallbackKey);
-        setUserKey(fallbackKey);
-      }
-      setStatus("Signed out — guest mode");
-      setAuthLoading(false);
-    }
-  };
-
-  const recommendationDeck = useMemo(() => {
-    const list = [
-      {
-        title: "Avoid 7–9am & 5–7pm peaks",
-        detail: "Traffic NO₂ spikes then. Shift errands to shoulder hours.",
-        icon: <ClockIcon className="h-5 w-5" />,
-      },
-      {
-        title: "Metro over car for crosstown trips",
-        detail: "Subway/metro cars cut exposure vs. bumper-to-bumper driving.",
-        icon: <BoltIcon className="h-5 w-5" />,
-      },
-      {
-        title: "Indoor workouts if PM₂.₅ > 35",
-        detail: "Switch to bodyweight or gym on hazy days to protect lungs.",
-        icon: <ExclamationTriangleIcon className="h-5 w-5" />,
-      },
-      {
-        title: "Green corridor routing",
-        detail:
-          "Pick park or waterfront paths; vegetation buffers trim fine dust by ~20%.",
-        icon: <SparklesIcon className="h-5 w-5" />,
-      },
-    ];
-    if (risk.level === "high") {
-      list.unshift({
-        title: "Mask up (N95/FFP2) outdoors",
-        detail: "Short errands only; keep windows closed on rideshares.",
-        icon: <ExclamationTriangleIcon className="h-5 w-5" />,
-      });
-    }
-    return list.slice(0, 4);
-  }, [risk.level]);
-
-  const badges = useMemo(() => {
-    const pts = passport?.profile?.points ?? 0;
-    const streak = passport?.profile?.streak ?? 0;
-    return [
-      streak >= 7
-        ? "Clean Week Hero"
-        : streak >= 3
-          ? "Consistency Starter"
-          : "Daily Check-in",
-      pts >= 200 ? "Urban Shield Gold" : pts >= 120 ? "Silver Lung" : "Bronze Breeze",
-      risk.level === "low" ? "Fresh Air Moment" : "Guardian Mode",
-    ];
-  }, [passport?.profile?.points, passport?.profile?.streak, risk.level]);
-
-  const isSignedIn = Boolean(session?.user);
-
-  const scrollToPassport = () => {
-    if (passportRef.current) {
-      passportRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
+export default function Landing() {
+  const appName = "NafasLokal";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10 md:px-10 lg:px-14">
-      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="pill inline-flex items-center gap-2 text-xs uppercase tracking-[0.1em] text-slate-600">
+    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 md:px-10 lg:px-14">
+      {/* Hero */}
+      <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
+        <div className="space-y-4">
+          <p className="pill inline-flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-slate-600">
             <SparklesIcon className="h-4 w-4" />
-            Personalized Air Exposure Passport
+            Malaysia-first air wellness
           </p>
-          <h1 className="mt-3 font-display text-3xl font-semibold text-slate-900 md:text-4xl">
-            Breathe smarter. Move healthier.
+          <h1 className="font-display text-4xl font-semibold text-slate-900 md:text-5xl">
+            {appName}: breathe smarter across the Klang Valley.
           </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Real-time PM2.5 & NO₂ near you, with commute tips and streak-based rewards.
+          <p className="text-lg text-slate-700">
+            A calm home for commuters to track air quality, choose cleaner routes, and earn rewards
+            for low-exposure days. Built for KL heat, haze, and rapid metro hops.
           </p>
-          <p className="mt-2 text-xs text-slate-500">
-            Status: {status}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 text-sm text-slate-700">
-          <span className="pill inline-flex items-center gap-2">
-            <MapPinIcon className="h-4 w-4" />
-            {coords.label} {coords.lat.toFixed(3)}, {coords.lon.toFixed(3)}
-          </span>
-          <span className="pill inline-flex items-center gap-2">
-            <ArrowPathIcon className="h-4 w-4" />
-            Updated: {formatTime(air?.lastUpdated)}
-          </span>
-          <span className="pill inline-flex items-center gap-2">
-            <SparklesIcon className="h-4 w-4" />
-            Source: {air?.source === "waqi" ? "WAQI" : "OpenAQ"}
-          </span>
-        </div>
-      </header>
-
-      <section className="card flex flex-col gap-5 rounded-2xl p-5 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Account</p>
-          <h2 className="text-lg font-semibold text-slate-900">
-            {isSignedIn ? "You’re synced. Keep exploring." : "Sign in to keep your passport synced"}
-          </h2>
-          <p className="text-sm text-slate-700">
-            {isSignedIn
-              ? `Signed in as ${session?.user?.email}. Your streaks and badges stay backed up.`
-              : "Guest mode is active. Sign in to save streaks and rewards across devices."}
-          </p>
-          <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-            <span className="pill">Convex-auth sessions</span>
-            <span className="pill">Guest fallback</span>
-            <span className="pill">No marketing spam</span>
-          </div>
-          {authMessage && (
-            <p
-              className={`text-xs ${/fail|error|invalid/i.test(authMessage) ? "text-rose-700" : "text-emerald-700"}`}
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-800"
             >
-              {authMessage}
-            </p>
-          )}
+              Launch live dashboard
+              <ArrowLongRightIcon className="h-4 w-4" />
+            </Link>
+            <Link
+              href="/register"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-800 transition hover:bg-white"
+            >
+              Create account
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+            <span className="pill">WAQI + OpenAQ</span>
+            <span className="pill">Convex auth</span>
+            <span className="pill">Streaks & badges</span>
+            <span className="pill">Designed in MY</span>
+          </div>
         </div>
 
-        {isSignedIn ? (
-          <div className="flex w-full flex-wrap items-center gap-2 text-sm md:max-w-[480px]">
-            <button
-              onClick={scrollToPassport}
-              className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-800"
+        <div className="relative">
+          <div className="card relative overflow-hidden rounded-3xl p-6">
+            <div className="absolute inset-0 -z-10 bg-gradient-to-br from-sky-100 via-white to-emerald-50" />
+            <div className="absolute -left-6 -top-6 h-28 w-28 rounded-full bg-sky-200/40 blur-3xl" />
+            <div className="absolute -right-8 -bottom-10 h-32 w-32 rounded-full bg-amber-200/50 blur-3xl" />
+
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Snapshot</p>
+            <h3 className="mt-2 font-display text-2xl text-slate-900">Today in KLCC</h3>
+            <p className="text-sm text-slate-600">PM2.5 mild · shift errands to after 11am.</p>
+
+            <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">PM2.5</p>
+                <p className="font-display text-3xl text-slate-900">28</p>
+                <p className="text-[11px] text-slate-500">µg/m³</p>
+              </div>
+              <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">NO₂</p>
+                <p className="font-display text-3xl text-slate-900">19</p>
+                <p className="text-[11px] text-slate-500">ppb</p>
+              </div>
+              <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">Score</p>
+                <p className="font-display text-3xl text-emerald-700">82</p>
+                <p className="text-[11px] text-slate-500">Low risk</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl bg-slate-900 text-slate-100">
+              <div className="flex items-center justify-between px-4 py-3 text-xs uppercase tracking-[0.12em]">
+                <span className="flex items-center gap-2">
+                  <BoltIcon className="h-4 w-4 text-amber-300" />
+                  Smart tips
+                </span>
+                <span className="pill border-white/10 bg-white/10 text-[11px] text-slate-100">
+                  KL commuter
+                </span>
+              </div>
+              <div className="space-y-3 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 px-4 py-4">
+                <div className="flex items-start gap-3 text-sm">
+                  <ShieldCheckIcon className="h-5 w-5 text-emerald-300" />
+                  <p>Take LRT for crosstown; cars add +12 NO₂ points in rush hour.</p>
+                </div>
+                <div className="flex items-start gap-3 text-sm">
+                  <MapPinIcon className="h-5 w-5 text-sky-300" />
+                  <p>Use park connectors near Lake Gardens; greenery trims fine dust.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Mission */}
+      <section className="card rounded-3xl p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Our mission</p>
+            <h2 className="font-display text-2xl text-slate-900">
+              Keep Malaysians moving with cleaner air, one trip at a time.
+            </h2>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <GlobeAsiaAustraliaIcon className="h-5 w-5" />
+            Built for Klang Valley, ready for Penang & JB next.
+          </div>
+        </div>
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          {pillars.map((item) => (
+            <div
+              key={item.title}
+              className="rounded-2xl bg-white/85 p-4 shadow-sm ring-1 ring-slate-100"
+            >
+              <div className="flex items-center gap-2">
+                {item.icon}
+                <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+              </div>
+              <p className="mt-2 text-sm text-slate-600">{item.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr] lg:items-start">
+        <div className="card rounded-3xl p-6">
+          <p className="text-xs uppercase tracking-[0.14em] text-slate-500">How it works</p>
+          <h3 className="mt-2 font-display text-xl text-slate-900">
+            Three calm steps to cleaner daily air.
+          </h3>
+          <div className="mt-4 space-y-3">
+            {steps.map((step) => (
+              <div
+                key={step.label}
+                className="flex items-start gap-3 rounded-2xl bg-white/85 p-4 shadow-sm ring-1 ring-slate-100"
+              >
+                <span className="pill text-xs font-semibold">{step.label}</span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{step.title}</p>
+                  <p className="text-sm text-slate-600">{step.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3 text-sm">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-800"
             >
               Open dashboard
-            </button>
-            <button
-              onClick={handleLogout}
-              className="rounded-full border border-rose-200 px-4 py-2 font-semibold text-rose-600 transition hover:bg-rose-50"
-              disabled={authLoading}
+            </Link>
+            <Link
+              href="/register"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 font-semibold text-slate-700 transition hover:bg-white"
             >
-              Sign out
-            </button>
-          </div>
-        ) : (
-          <div className="flex w-full flex-col gap-3 md:max-w-[480px]">
-            <div className="grid w-full gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                Email
-                <input
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@email.com"
-                  value={authEmail}
-                  onChange={(e) => {
-                    setAuthEmail(e.target.value);
-                    setAuthMessage("");
-                  }}
-                  className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-slate-400 focus:ring-1 focus:ring-slate-200"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                Password
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  value={authPassword}
-                  onChange={(e) => {
-                    setAuthPassword(e.target.value);
-                    setAuthMessage("");
-                  }}
-                  className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-slate-400 focus:ring-1 focus:ring-slate-200"
-                />
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <button
-                onClick={handleLogin}
-                className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
-                disabled={authLoading}
-              >
-                {authLoading ? "Working…" : "Sign in"}
-              </button>
-              <Link
-                href="/register"
-                className="rounded-full border border-slate-200 px-4 py-2 font-semibold text-slate-700 transition hover:bg-white"
-              >
-                Create account
-              </Link>
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Registration now lives on its own page so you can focus on a calm, single-task flow.
-            </p>
-          </div>
-        )}
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3" ref={passportRef} id="passport">
-        <div className="card col-span-1 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-[0.15em] text-slate-500">
-              Exposure Score
-            </span>
-            <span
-              className={`badge ${
-                risk.level === "low"
-                  ? "bg-green-50 text-green-700"
-                  : risk.level === "moderate"
-                    ? "bg-amber-50 text-amber-800"
-                    : "bg-rose-50 text-rose-700"
-              }`}
-            >
-              {risk.level === "loading"
-                ? "Loading"
-                : risk.level === "low"
-                  ? "Low"
-                  : risk.level === "moderate"
-                    ? "Moderate"
-                    : "High"}
-            </span>
-          </div>
-          <div className="mt-6 flex items-end gap-3">
-            <span className="font-display text-6xl text-slate-900">
-              {loadingAir ? "…" : risk.score}
-            </span>
-            <span className="pb-2 text-sm text-slate-500">/100</span>
-          </div>
-          <p className="mt-3 text-sm text-slate-600">{risk.narrative}</p>
-          <div className="mt-6 grid grid-cols-3 gap-2 text-center text-xs text-slate-600">
-            <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">PM2.5</p>
-              <p className="font-display text-2xl text-slate-900">
-                {formatValue(air?.pm25)}
-              </p>
-              <p className="text-[11px] text-slate-500">µg/m³</p>
-            </div>
-            <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">NO₂</p>
-              <p className="font-display text-2xl text-slate-900">
-                {formatValue(air?.no2)}
-              </p>
-              <p className="text-[11px] text-slate-500">ppb</p>
-            </div>
-            <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">CO</p>
-              <p className="font-display text-2xl text-slate-900">
-                {formatValue(air?.co)}
-              </p>
-              <p className="text-[11px] text-slate-500">ppm</p>
-            </div>
+              Create account
+            </Link>
           </div>
         </div>
 
-        <div className="card col-span-1 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-[0.15em] text-slate-500">
-              Rewards & Streak
-            </span>
-            <TrophyIcon className="h-5 w-5 text-amber-500" />
-          </div>
-          <div className="mt-5 grid grid-cols-2 gap-4">
-            <div className="rounded-xl bg-white/90 px-4 py-3 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                Points
-              </p>
-              <p className="font-display text-3xl text-slate-900">
-                {passport?.profile?.points ?? 0}
-              </p>
-              <p className="text-xs text-slate-500">
-                Low-exposure commutes boost rewards.
-              </p>
-            </div>
-            <div className="rounded-xl bg-white/90 px-4 py-3 shadow-sm">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                Streak
-              </p>
-              <p className="font-display text-3xl text-slate-900">
-                {passport?.profile?.streak ?? 0}d
-              </p>
-              <p className="text-xs text-slate-500">
-                Best: {passport?.profile?.bestStreak ?? 0}d
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
-            {badges.map((b) => (
-              <span key={b} className="badge bg-white/70 text-slate-800">
-                {b}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="card col-span-1 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs uppercase tracking-[0.15em] text-slate-500">
-              Quick Recommendations
-            </span>
-            <SparklesIcon className="h-5 w-5 text-sky-500" />
-          </div>
-          <div className="mt-4 space-y-3">
-            {recommendationDeck.map((rec) => (
-              <div
-                key={rec.title}
-                className="flex items-start gap-3 rounded-xl bg-white/90 p-3 shadow-sm"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
-                  {rec.icon}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{rec.title}</p>
-                  <p className="text-xs text-slate-600">{rec.detail}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="card rounded-2xl p-5 lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-slate-500">
-                Exposure Passport
-              </p>
-              <h2 className="font-display text-xl text-slate-900">
-                Latest trips & health score
-              </h2>
-            </div>
-            <button
-              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800"
-              onClick={() => fetchAir(coords.lat, coords.lon)}
-            >
-              <ArrowPathIcon className="h-4 w-4" />
-              Refresh AQ
-            </button>
-          </div>
-          <div className="mt-4 space-y-3">
-            {(passport?.exposures ?? []).map((entry: any) => (
-              <div
-                key={entry._id}
-                className="flex flex-col justify-between gap-3 rounded-xl bg-white/90 p-4 shadow-sm md:flex-row md:items-center"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {entry.locationName}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {new Date(entry.timestamp).toLocaleString()} • {entry.mode ?? "unknown mode"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-                  <span className="pill">Score {entry.score}</span>
-                  <span className="pill">PM2.5 {formatValue(entry.pm25 ?? null)}</span>
-                  <span className="pill">NO₂ {formatValue(entry.no2 ?? null)}</span>
-                  <span
-                    className={`pill ${
-                      entry.riskLevel === "low"
-                        ? "bg-green-50 text-green-700"
-                        : entry.riskLevel === "moderate"
-                          ? "bg-amber-50 text-amber-700"
-                          : "bg-rose-50 text-rose-700"
-                    }`}
-                  >
-                    {entry.riskLevel} risk
-                  </span>
-                </div>
-              </div>
-            ))}
-            {(passport?.exposures?.length ?? 0) === 0 && (
-              <div className="rounded-xl bg-white/90 p-4 text-sm text-slate-600 shadow-sm">
-                No trips logged yet. Capture your first commute to start streaks.
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="card rounded-2xl p-5">
-          <p className="text-xs uppercase tracking-[0.15em] text-slate-500">
-            Log a commute
-          </p>
-          <h3 className="mt-1 font-display text-lg text-slate-900">
-            Claim rewards for low exposure runs
+        <div className="card rounded-3xl p-6">
+          <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Impact</p>
+          <h3 className="mt-2 font-display text-xl text-slate-900">
+            Built for Malaysia’s rhythms.
           </h3>
-          <div className="mt-4 flex gap-2">
-            {(["walk", "metro", "drive"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`flex-1 rounded-xl px-3 py-2 text-sm capitalize transition ${
-                  mode === m
-                    ? "bg-slate-900 text-white shadow-sm"
-                    : "bg-white/90 text-slate-700 shadow-sm hover:bg-white"
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-          <div className="mt-4 space-y-2 text-sm text-slate-600">
-            <p>Current station: {air?.location ?? "…"}</p>
-            <p>PM2.5 {formatValue(air?.pm25)} · NO₂ {formatValue(air?.no2)}</p>
-            <p className="text-xs text-slate-500">
-              Logging adds points and extends your streak if today isn&apos;t logged yet.
-            </p>
-          </div>
-          <button
-            onClick={handleLog}
-            disabled={!air || saving}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-sky-500 to-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? "Saving…" : "Save this commute"}
-          </button>
-          <div className="mt-4 rounded-xl bg-white/90 p-4 text-xs text-slate-600 shadow-sm">
-            <p className="font-semibold text-slate-900">SDG 3 - Health</p>
-            <p>
-              Aligns with Good Health & Well-Being: mapping pollution to health risk,
-              spotting traffic stressors, and flagging clinic gaps for vulnerable areas.
-            </p>
+          <ul className="mt-4 space-y-3 text-sm text-slate-700">
+            <li className="flex items-start gap-2">
+              <BoltIcon className="mt-[2px] h-4 w-4 text-amber-500" />
+              Rush-hour aware guidance that nudges you to shift errands outside 7–9am & 5–7pm.
+            </li>
+            <li className="flex items-start gap-2">
+              <ShieldCheckIcon className="mt-[2px] h-4 w-4 text-emerald-500" />
+              Haze-season playbooks: mask reminders, indoor swaps, and notification-friendly layout.
+            </li>
+            <li className="flex items-start gap-2">
+              <MapPinIcon className="mt-[2px] h-4 w-4 text-sky-500" />
+              Park and waterfront routing suggestions to capture that 15–20% dust drop.
+            </li>
+          </ul>
+          <div className="mt-5 grid grid-cols-2 gap-3 text-center text-sm">
+            <div className="rounded-2xl bg-white/85 p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">KL & PJ</p>
+              <p className="font-display text-3xl text-slate-900">Live</p>
+              <p className="text-[11px] text-slate-500">Metro & driving modes</p>
+            </div>
+            <div className="rounded-2xl bg-white/85 p-4 shadow-sm">
+              <p className="text-[11px] uppercase tracking-[0.1em] text-slate-500">Penang beta</p>
+              <p className="font-display text-3xl text-slate-900">Soon</p>
+              <p className="text-[11px] text-slate-500">Green corridor focus</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="card rounded-2xl p-5 lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-slate-500">
-                Trend (last 7 days)
-              </p>
-              <h3 className="font-display text-lg text-slate-900">
-                Average score: {insight?.trend?.length
-                  ? insight.trend.slice(-7).reduce((acc: number, d: any) => acc + d.average, 0) /
-                    insight.trend.slice(-7).length
-                  : "—"}
-              </h3>
-            </div>
-            <span className="badge bg-white/80 text-slate-800">
-              Samples: {insight?.sampleCount ?? 0}
-            </span>
+      {/* Footer */}
+      <section className="rounded-3xl bg-slate-900 p-6 text-slate-100">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="pill border-white/15 bg-white/10 text-[11px] uppercase tracking-[0.14em] text-slate-100">
+              {appName}
+            </p>
+            <h4 className="mt-2 font-display text-2xl">Breathe better, move kinder.</h4>
+            <p className="text-sm text-slate-200">
+              Live air, nudges, and rewards for Malaysia’s daily movers.
+            </p>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-            {(insight?.trend ?? []).slice(-8).map((day: any) => (
-              <div
-                key={day.day}
-                className="rounded-xl bg-white/90 p-3 shadow-sm"
-              >
-                <p className="text-xs text-slate-500">{day.day}</p>
-                <p className="font-display text-2xl text-slate-900">{day.average}</p>
-                <p className="text-[11px] text-slate-500">{day.samples} samples</p>
-              </div>
-            ))}
-            {(insight?.trend?.length ?? 0) === 0 && (
-              <p className="text-sm text-slate-600">
-                Log a few commutes to unlock personalized trendlines.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="card rounded-2xl p-5">
-          <p className="text-xs uppercase tracking-[0.15em] text-slate-500">
-            Health Playbook
-          </p>
-          <div className="mt-3 space-y-3 text-sm text-slate-700">
-            <div className="rounded-xl bg-white/90 p-3 shadow-sm">
-              <p className="font-semibold text-slate-900">Pollution-aware routing</p>
-              <p>Future-ready: plug in OpenStreetMap traffic density to re-route automatically.</p>
-            </div>
-            <div className="rounded-xl bg-white/90 p-3 shadow-sm">
-              <p className="font-semibold text-slate-900">Health risk alerts</p>
-              <p>Pair WHO urban health stats to flag seniors, kids, or asthma-prone zones.</p>
-            </div>
-            <div className="rounded-xl bg-white/90 p-3 shadow-sm">
-              <p className="font-semibold text-slate-900">Clinic access gaps</p>
-              <p>Overlay DOE Malaysia AQI + OpenAQ with clinic distances to spot underserved areas.</p>
-            </div>
+          <div className="flex flex-wrap gap-2 text-sm">
+            <Link
+              href="/dashboard"
+              className="rounded-full bg-white px-4 py-2 font-semibold text-slate-900 shadow-sm transition hover:bg-slate-50"
+            >
+              Open dashboard
+            </Link>
+            <Link
+              href="/register"
+              className="rounded-full border border-white/30 px-4 py-2 font-semibold text-white transition hover:bg-white/10"
+            >
+              Create account
+            </Link>
           </div>
         </div>
       </section>

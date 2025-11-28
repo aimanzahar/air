@@ -44,7 +44,6 @@ export const signup = mutation({
     const email = normalizeEmail(args.email);
     const existing = await ctx.db
       .query("users")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_email", (q) => q.eq("email", email))
       .unique();
     if (existing) throw new Error("Account already exists. Try signing in.");
@@ -75,7 +74,6 @@ export const login = mutation({
     const email = normalizeEmail(args.email);
     const user = await ctx.db
       .query("users")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_email", (q) => q.eq("email", email))
       .unique();
     if (!user) throw new Error("No account found for that email");
@@ -86,7 +84,6 @@ export const login = mutation({
     // Drop expired sessions for this user
     const oldSessions = await ctx.db
       .query("sessions")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
     await Promise.all(
@@ -109,10 +106,10 @@ export const session = query({
   args: { token: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (!args.token) return null;
+    const token = args.token;
     const record = await ctx.db
       .query("sessions")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
-      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .withIndex("by_token", (q) => q.eq("token", token))
       .unique();
     if (!record || record.expiresAt < Date.now()) return null;
     const user = await ctx.db.get(record.userId);
@@ -130,7 +127,6 @@ export const logout = mutation({
   handler: async (ctx, args) => {
     const session = await ctx.db
       .query("sessions")
-      // @ts-expect-error Convex codegen isn't checked in; index exists at runtime.
       .withIndex("by_token", (q) => q.eq("token", args.token))
       .unique();
     if (session) await ctx.db.delete(session._id);
