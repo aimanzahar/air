@@ -30,3 +30,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      app_net:
+        ipv4_address: 172.29.0.2
+
+networks:
+  app_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
