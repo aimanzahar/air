@@ -610,11 +610,6 @@ export default function Home() {
               ? `Signed in as ${user?.email}. Your streaks and badges stay backed up.`
               : "Guest mode is active. Sign in to save streaks and rewards across devices."}
           </p>
-          <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-            <span className="pill">Convex-auth sessions</span>
-            <span className="pill">Guest fallback</span>
-            <span className="pill">No marketing spam</span>
-          </div>
           {authMessage && (
             <p
               className={`text-xs ${/fail|error|invalid/i.test(authMessage) ? "text-rose-700" : "text-emerald-700"}`}

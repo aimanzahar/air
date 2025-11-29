@@ -105,12 +105,6 @@ export default function Landing() {
               </>
             )}
           </div>
-          <div className="initial-hidden animate-fade-in delay-400 flex flex-wrap gap-2 text-xs text-slate-600">
-            <span className="pill transition-transform duration-300 hover:scale-110">WAQI + OpenAQ</span>
-            <span className="pill transition-transform duration-300 hover:scale-110">Convex auth</span>
-            <span className="pill transition-transform duration-300 hover:scale-110">Streaks & badges</span>
-            <span className="pill transition-transform duration-300 hover:scale-110">Designed in MY</span>
-          </div>
         </div>
 
         <div className="relative initial-hidden animate-slide-left delay-200">
