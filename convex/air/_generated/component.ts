@@ -111,6 +111,65 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    healthProfile: {
+      deleteHealthProfile: FunctionReference<
+        "mutation",
+        "internal",
+        { userKey: string },
+        any,
+        Name
+      >;
+      getHealthProfile: FunctionReference<
+        "query",
+        "internal",
+        { userKey: string },
+        any,
+        Name
+      >;
+      isHealthProfileComplete: FunctionReference<
+        "query",
+        "internal",
+        { userKey: string },
+        any,
+        Name
+      >;
+      saveHealthProfile: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          activityLevel?: string;
+          age?: string;
+          conditionSeverity?: string;
+          conditions: Array<string>;
+          gender?: string;
+          hasAirPurifier?: boolean;
+          hasHeartCondition?: boolean;
+          hasRespiratoryCondition: boolean;
+          isPregnant?: boolean;
+          livesNearTraffic?: boolean;
+          medications: Array<string>;
+          name?: string;
+          outdoorExposure?: string;
+          smokingStatus?: string;
+          userKey: string;
+        },
+        any,
+        Name
+      >;
+      updateHealthConditions: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          conditionSeverity?: string;
+          conditions: Array<string>;
+          hasRespiratoryCondition: boolean;
+          medications: Array<string>;
+          userKey: string;
+        },
+        any,
+        Name
+      >;
+    };
     passport: {
       ensureProfile: FunctionReference<
         "mutation",

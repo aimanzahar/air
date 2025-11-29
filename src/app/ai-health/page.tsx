@@ -19,6 +19,10 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import Navbar from '@/components/navigation/Navbar';
+import HealthProfileForm from '@/components/health/HealthProfileForm';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 
 interface HealthInsight {
   id: string;
@@ -58,22 +62,36 @@ interface HealthPredictionResponse {
 }
 
 export default function AIHealthPage() {
+  const { user } = useAuth();
+  const userKey = user?.email || '';
+
   const [selectedTimeframe, setSelectedTimeframe] = useState<'24h' | '7d' | '30d'>('24h');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [predictions, setPredictions] = useState<HealthPredictionResponse | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [showProfileForm, setShowProfileForm] = useState(false);
+
+  // Check if user has completed health profile
+  const healthProfileCheck = useQuery(api.healthProfile.isHealthProfileComplete, userKey ? { userKey } : 'skip');
 
   const fetchPredictions = useCallback(async (lat: number, lng: number) => {
     setLoading(true);
     setError(null);
-    
+
     try {
+      const requestBody: any = { lat, lng };
+
+      // Include health profile data if available
+      if (healthProfileCheck?.profile) {
+        requestBody.healthProfile = healthProfileCheck.profile;
+      }
+
       const response = await fetch('/api/ai-health', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lng }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -90,6 +108,15 @@ export default function AIHealthPage() {
       setLoading(false);
     }
   }, []);
+
+  // Check health profile completion
+  useEffect(() => {
+    if (healthProfileCheck && !healthProfileCheck.exists) {
+      setShowProfileForm(true);
+    } else if (healthProfileCheck && !healthProfileCheck.isComplete) {
+      setShowProfileForm(true);
+    }
+  }, [healthProfileCheck]);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -123,6 +150,14 @@ export default function AIHealthPage() {
     }
   };
 
+  const handleProfileComplete = () => {
+    setShowProfileForm(false);
+    // Refetch predictions with updated profile
+    if (location) {
+      fetchPredictions(location.lat, location.lng);
+    }
+  };
+
   const healthScore = predictions?.healthScore ?? 0;
   const exposureReduction = predictions?.exposureReduction ?? 0;
   const healthInsights = predictions?.insights ?? [];
@@ -141,6 +176,10 @@ export default function AIHealthPage() {
     <>
       <Navbar />
       <main className="min-h-screen bg-[var(--background)] pt-20">
+        {/* Health Profile Form Modal */}
+        {showProfileForm && userKey && (
+          <HealthProfileForm onComplete={handleProfileComplete} />
+        )}
         <div className="mx-auto max-w-6xl px-4 py-8 md:px-10">
           {/* Hero Section */}
           <section className="mb-8">

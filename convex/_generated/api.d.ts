@@ -10,6 +10,7 @@
 
 import type * as airHistory from "../airHistory.js";
 import type * as auth from "../auth.js";
+import type * as healthProfile from "../healthProfile.js";
 import type * as passport from "../passport.js";
 
 import type {
@@ -21,6 +22,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   airHistory: typeof airHistory;
   auth: typeof auth;
+  healthProfile: typeof healthProfile;
   passport: typeof passport;
 }>;
 
@@ -117,6 +119,60 @@ export declare const components: {
         "mutation",
         "internal",
         { email: string; name: string; password: string },
+        any
+      >;
+    };
+    healthProfile: {
+      deleteHealthProfile: FunctionReference<
+        "mutation",
+        "internal",
+        { userKey: string },
+        any
+      >;
+      getHealthProfile: FunctionReference<
+        "query",
+        "internal",
+        { userKey: string },
+        any
+      >;
+      isHealthProfileComplete: FunctionReference<
+        "query",
+        "internal",
+        { userKey: string },
+        any
+      >;
+      saveHealthProfile: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          activityLevel?: string;
+          age?: string;
+          conditionSeverity?: string;
+          conditions: Array<string>;
+          gender?: string;
+          hasAirPurifier?: boolean;
+          hasHeartCondition?: boolean;
+          hasRespiratoryCondition: boolean;
+          isPregnant?: boolean;
+          livesNearTraffic?: boolean;
+          medications: Array<string>;
+          name?: string;
+          outdoorExposure?: string;
+          smokingStatus?: string;
+          userKey: string;
+        },
+        any
+      >;
+      updateHealthConditions: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          conditionSeverity?: string;
+          conditions: Array<string>;
+          hasRespiratoryCondition: boolean;
+          medications: Array<string>;
+          userKey: string;
+        },
         any
       >;
     };

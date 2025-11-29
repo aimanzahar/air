@@ -29,6 +29,34 @@ export default defineSchema({
     lastActiveDate: v.string(), // ISO date (yyyy-mm-dd)
   }).index("by_userKey", ["userKey"]),
 
+  // Health profile for AI-powered health recommendations
+  healthProfiles: defineTable({
+    userKey: v.string(),
+    // Basic profile
+    name: v.optional(v.string()),
+    age: v.optional(v.string()), // "child", "teen", "adult", "senior"
+    gender: v.optional(v.string()),
+    // Respiratory health passport
+    hasRespiratoryCondition: v.boolean(),
+    conditions: v.array(v.string()), // ["asthma", "copd", "allergies", etc.]
+    conditionSeverity: v.optional(v.string()), // "mild", "moderate", "severe"
+    // Lifestyle factors
+    activityLevel: v.optional(v.string()), // "sedentary", "light", "moderate", "active"
+    outdoorExposure: v.optional(v.string()), // "low", "medium", "high" - daily outdoor time
+    smokingStatus: v.optional(v.string()), // "never", "former", "current"
+    // Living environment
+    livesNearTraffic: v.optional(v.boolean()),
+    hasAirPurifier: v.optional(v.boolean()),
+    // Additional health factors
+    isPregnant: v.optional(v.boolean()),
+    hasHeartCondition: v.optional(v.boolean()),
+    medications: v.array(v.string()), // respiratory medications
+    // Meta
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    isComplete: v.boolean(), // true if all essential fields are filled
+  }).index("by_userKey", ["userKey"]),
+
   exposures: defineTable({
     profileId: v.id("profiles"),
     lat: v.number(),

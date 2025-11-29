@@ -10,6 +10,7 @@
 
 import type * as airQualityHistory from "../airQualityHistory.js";
 import type * as auth from "../auth.js";
+import type * as healthProfile from "../healthProfile.js";
 import type * as passport from "../passport.js";
 
 import type {
@@ -22,6 +23,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   airQualityHistory: typeof airQualityHistory;
   auth: typeof auth;
+  healthProfile: typeof healthProfile;
   passport: typeof passport;
 }> = anyApi as any;
 

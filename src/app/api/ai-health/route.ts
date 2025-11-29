@@ -26,6 +26,22 @@ interface HealthPredictionRequest {
     conditions?: string[];
     age?: string;
   };
+  healthProfile?: {
+    name?: string;
+    age?: string;
+    gender?: string;
+    hasRespiratoryCondition?: boolean;
+    conditions?: string[];
+    conditionSeverity?: string;
+    activityLevel?: string;
+    outdoorExposure?: string;
+    smokingStatus?: string;
+    livesNearTraffic?: boolean;
+    hasAirPurifier?: boolean;
+    isPregnant?: boolean;
+    hasHeartCondition?: boolean;
+    medications?: string[];
+  };
 }
 
 interface HealthInsight {
@@ -103,7 +119,7 @@ async function fetchAirQuality(lat: number, lng: number): Promise<AirQualityData
   }
 }
 
-function generateHealthPrompt(airQuality: AirQualityData | null, userProfile?: HealthPredictionRequest['userProfile']): string {
+function generateHealthPrompt(airQuality: AirQualityData | null, healthProfile?: HealthPredictionRequest['healthProfile']): string {
   const now = new Date();
   const hour = now.getHours();
   const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
@@ -129,11 +145,22 @@ Current Air Quality Data:
 - SO₂: ${airQuality.so2} ppb
 ` : 'No current air quality data available.';
 
-  const userContext = userProfile ? `
-User Profile:
-- Has respiratory condition: ${userProfile.hasRespiratoryCondition || false}
-- Conditions: ${userProfile.conditions?.join(', ') || 'None specified'}
-- Age group: ${userProfile.age || 'Not specified'}
+  const userContext = healthProfile ? `
+User Health Profile:
+- Name: ${healthProfile.name || 'Not specified'}
+- Age group: ${healthProfile.age || 'Not specified'}
+- Gender: ${healthProfile.gender || 'Not specified'}
+- Has respiratory condition: ${healthProfile.hasRespiratoryCondition || false}
+- Respiratory conditions: ${healthProfile.conditions?.join(', ') || 'None specified'}
+- Condition severity: ${healthProfile.conditionSeverity || 'Not specified'}
+- Activity level: ${healthProfile.activityLevel || 'Not specified'}
+- Daily outdoor exposure: ${healthProfile.outdoorExposure || 'Not specified'}
+- Smoking status: ${healthProfile.smokingStatus || 'Not specified'}
+- Lives near traffic: ${healthProfile.livesNearTraffic || false}
+- Has air purifier: ${healthProfile.hasAirPurifier || false}
+- Is pregnant: ${healthProfile.isPregnant || false}
+- Has heart condition: ${healthProfile.hasHeartCondition || false}
+- Current medications: ${healthProfile.medications?.join(', ') || 'None specified'}
 ` : '';
 
   const timeContext = `
@@ -154,6 +181,22 @@ ${userContext}
 ${timeContext}
 
 IMPORTANT: Generate fresh, varied insights each time. Consider the current time of day, day of week, and seasonal factors. Focus particularly on "${randomFocus}" with "${randomStyle}" style insights. Avoid generic or repetitive advice - be specific to the current conditions and context.
+
+${healthProfile ? `
+PERSONALIZATION REQUIREMENTS:
+1. Address the user by name if provided: "${healthProfile.name}"
+2. Tailor recommendations specifically to their health conditions:
+   - If they have respiratory conditions (${healthProfile.conditions?.join(', ')}), provide specific advice for managing these conditions with current air quality
+   - Consider their activity level ("${healthProfile.activityLevel}") when recommending outdoor activities
+   - Factor in their outdoor exposure level ("${healthProfile.outdoorExposure}") for risk assessment
+   - If they live near traffic (${healthProfile.livesNearTraffic}), provide specific advice about traffic-related pollution
+   - Consider air purifier usage (${healthProfile.hasAirPurifier}) in indoor air quality recommendations
+   - If pregnant (${healthProfile.isPregnant}), provide pregnancy-specific health guidance
+   - If heart condition (${healthProfile.hasHeartCondition}), include cardiovascular health considerations
+   - Account for smoking status ("${healthProfile.smokingStatus}") in health risk assessment
+   - Consider medications (${healthProfile.medications?.join(', ')}) when providing health advice
+3. Generate highly personalized actionable steps based on their specific health profile and current conditions
+` : ''}
 
 Generate a JSON response with the following structure (respond ONLY with valid JSON, no markdown):
 {
@@ -378,8 +421,11 @@ export async function POST(request: NextRequest) {
   
   try {
     const body: HealthPredictionRequest = await request.json();
-    const { lat, lng, airQualityData, userProfile } = body;
+    const { lat, lng, airQualityData, userProfile, healthProfile } = body;
     console.log(`[AI-Health] Location: lat=${lat}, lng=${lng}`);
+
+    // Use healthProfile if available, otherwise fall back to userProfile
+    const profile = healthProfile || userProfile;
 
     // Fetch current air quality if not provided
     let airQuality = airQualityData || null;
@@ -401,8 +447,8 @@ export async function POST(request: NextRequest) {
     try {
       // Generate AI predictions
       console.log('[AI-Health] Generating AI prompt...');
-      const prompt = generateHealthPrompt(airQuality, userProfile);
-      
+      const prompt = generateHealthPrompt(airQuality, profile);
+
       console.log(`[AI-Health] 🤖 Calling AI model: ${config.model}`);
       console.log(`[AI-Health] Base URL: ${config.baseUrl}`);
       const aiStartTime = Date.now();
