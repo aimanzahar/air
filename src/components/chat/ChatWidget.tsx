@@ -509,7 +509,7 @@ const ChatWidget: React.FC = () => {
               )}
               <div className="message-bubble">
                 <div className="message-content">
-                  {formatMessage(message.content, message.role === 'assistant')}
+                  {formatMessage(message.content, message.role?.toString() === 'assistant')}
                 </div>
                 {message.metadata?.airQualityData && renderAirQualityBadge(message.metadata.airQualityData)}
                 <div className="message-timestamp">

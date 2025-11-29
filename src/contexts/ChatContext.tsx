@@ -93,6 +93,16 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
               parsed.timestamp = new Date();
             }
           }
+          // Ensure role is a string and is valid
+          if (!parsed.role || !['user', 'assistant', 'system'].includes(parsed.role)) {
+            console.warn('Invalid or missing role in message, defaulting to assistant:', parsed.role);
+            parsed.role = 'assistant';
+          }
+          // Ensure content is a string
+          if (typeof parsed.content !== 'string') {
+            console.warn('Invalid content type in message, converting to string');
+            parsed.content = String(parsed.content || '');
+          }
           loadedMessages.push(parsed as ChatMessage);
         } catch (error) {
           console.error('Error parsing message from localStorage:', error);
@@ -248,6 +258,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       }
 
       const data: ChatResponse = await response.json();
+      
+      // Log the received data
+      console.log('[DEBUG] Received response from API:', data);
+      console.log('[DEBUG] Main message content:', data.message.content);
 
       // Replace thinking message with actual response
       setMessages(prev => {
@@ -264,16 +278,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           };
         }
         
-        // Add suggestions as separate assistant messages if they exist
-        if (data.suggestions && data.suggestions.length > 0) {
-          const suggestionsMessage: ChatMessage = {
-            id: `suggestions-${Date.now()}`,
-            role: 'assistant',
-            content: data.suggestions.map(s => `• ${s}`).join('\n'),
-            timestamp: new Date(),
-          };
-          newMessages.push(suggestionsMessage);
-        }
+        // NOTE: Suggestions are no longer displayed as separate messages
+        // They were causing formatting issues with malformed markdown from AI responses
+        // The main AI response should contain all necessary information
         
         return newMessages;
       });
