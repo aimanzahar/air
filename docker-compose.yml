@@ -8,21 +8,30 @@ services:
       args:
         NEXT_PUBLIC_CONVEX_URL: "https://convex.zahar.my"
         CONVEX_SELF_HOSTED_URL: "https://convex.zahar.my"
+        CONVEX_DEPLOY_KEY: ${CONVEX_DEPLOY_KEY}
     container_name: air-app
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
-      # Set this to your Convex deployment URL (must be https when site is https)
-      # Example (Convex Cloud): https://<your-deployment>.convex.cloud
-      # Example (self-hosted): https://convex.yourdomain.com
+      # Convex configuration
       NEXT_PUBLIC_CONVEX_URL: "https://convex.zahar.my"
+      CONVEX_DEPLOY_KEY: ${CONVEX_DEPLOY_KEY}
+      # Optional: Add your Convex admin key if needed for additional operations
+      CONVEX_ADMIN_KEY: ${CONVEX_ADMIN_KEY}
     ports:
       - "3000:3000"
     restart: unless-stopped
     networks:
       app_net:
         ipv4_address: 172.29.0.2
+    # Add health check to ensure the service is running
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   app_net:
