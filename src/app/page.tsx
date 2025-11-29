@@ -12,6 +12,7 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import Navbar from "@/components/navigation/Navbar";
 
 const pillars = [
   {
@@ -54,7 +55,9 @@ export default function Landing() {
   const appName = "NafasLokal";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 md:px-10 lg:px-14">
+    <>
+      <Navbar />
+      <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 pt-24 md:px-10 lg:px-14">
       {/* Hero */}
       <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
         <div className="space-y-4">
@@ -320,5 +323,6 @@ export default function Landing() {
         </div>
       </section>
     </main>
+    </>
   );
 }

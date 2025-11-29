@@ -13,7 +13,6 @@ import {
   PlayIcon,
   PauseIcon,
   MapIcon,
-  ArrowLeftIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { nanoid } from "nanoid";
@@ -39,6 +38,7 @@ import { ChatProvider } from "@/contexts/ChatContext";
 import ChatWidget from "@/components/chat/ChatWidget";
 import ChatErrorBoundary from "@/components/chat/ChatErrorBoundary";
 import AirQualityComparison from "@/components/analytics/AirQualityComparison";
+import Navbar from "@/components/navigation/Navbar";
 
 // Dynamically import the map to avoid SSR issues
 const AirQualityMap = dynamic(() => import("../../components/map/AirQualityMap"), {
@@ -596,18 +596,8 @@ export default function Home() {
 
   return (
     <ChatProvider>
-      <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10 md:px-10 lg:px-14">
-      {/* Back Navigation */}
-      <nav className="initial-hidden animate-slide-down">
-        <Link 
-          href="/"
-          className="group inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-all duration-200 hover:text-slate-900"
-        >
-          <ArrowLeftIcon className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-1" />
-          <span>Back to Home</span>
-        </Link>
-      </nav>
-
+      <Navbar />
+      <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-10 pt-24 md:px-10 lg:px-14">
       <header className="initial-hidden animate-slide-down flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="pill inline-flex items-center gap-2 text-xs uppercase tracking-[0.1em] text-slate-600">
