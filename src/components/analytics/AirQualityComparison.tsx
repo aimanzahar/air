@@ -58,6 +58,12 @@ interface ComparisonDataPoint {
   readings: number;
 }
 
+interface TrendDay {
+  day: string;
+  average: number;
+  samples: number;
+}
+
 interface AirQualityComparisonProps {
   userKey: string;
   currentAqi?: number;
@@ -67,6 +73,8 @@ interface AirQualityComparisonProps {
   currentPm25?: number;
   currentNo2?: number;
   currentSource?: string;
+  passportTrend?: TrendDay[];
+  passportSampleCount?: number;
 }
 
 type TimeRange = '24h' | '7d' | '30d';
@@ -101,10 +109,12 @@ export default function AirQualityComparison({
   currentPm25,
   currentNo2,
   currentSource,
+  passportTrend,
+  passportSampleCount,
 }: AirQualityComparisonProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>('7d');
   const [chartType, setChartType] = useState<ChartType>('trend');
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   // Convex queries - using wrapper functions that expose air component
   const days = timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : 30;
@@ -133,18 +143,54 @@ export default function AirQualityComparison({
     }
   }, [currentAqi, currentLocation, currentLat, currentLng, currentSource, currentPm25, currentNo2, userKey, storeReading]);
 
-  // Process data for charts
+  // Process data for charts - merge passport trend with air history data
   const trendData: TrendDataPoint[] = useMemo(() => {
-    if (!dailyAverages) return [];
-    return dailyAverages.map((day: DailyAverage) => ({
-      date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      fullDate: day.date,
-      aqi: day.avgAqi,
-      pm25: day.avgPm25,
-      no2: day.avgNo2,
-      readings: day.readings,
-    }));
-  }, [dailyAverages]);
+    // Create a map to combine data from both sources by date
+    const dataByDate: Record<string, TrendDataPoint> = {};
+    
+    // Add data from dailyAverages (airQualityHistory)
+    if (dailyAverages) {
+      dailyAverages.forEach((day: DailyAverage) => {
+        const dateKey = day.date;
+        dataByDate[dateKey] = {
+          date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          fullDate: day.date,
+          aqi: day.avgAqi,
+          pm25: day.avgPm25,
+          no2: day.avgNo2,
+          readings: day.readings,
+        };
+      });
+    }
+    
+    // Merge/override with passport trend data (exposures) - this is the "score" which maps to AQI-like values
+    if (passportTrend) {
+      passportTrend.forEach((day: TrendDay) => {
+        const dateKey = day.day; // format: YYYY-MM-DD
+        if (dataByDate[dateKey]) {
+          // Combine readings count, but use passport average as it has more samples
+          dataByDate[dateKey] = {
+            ...dataByDate[dateKey],
+            aqi: day.average, // Use passport score as it's more comprehensive
+            readings: dataByDate[dateKey].readings + day.samples,
+          };
+        } else {
+          // Add new entry from passport data
+          dataByDate[dateKey] = {
+            date: new Date(day.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            fullDate: day.day,
+            aqi: day.average,
+            pm25: null,
+            no2: null,
+            readings: day.samples,
+          };
+        }
+      });
+    }
+    
+    // Sort by date and return
+    return Object.values(dataByDate).sort((a, b) => a.fullDate.localeCompare(b.fullDate));
+  }, [dailyAverages, passportTrend]);
 
   const comparisonData: ComparisonDataPoint[] = useMemo(() => {
     if (!locationComparison) return [];
@@ -229,6 +275,30 @@ export default function AirQualityComparison({
           </svg>
         </button>
       </div>
+
+      {/* Passport Trend Section - Last 7 Days */}
+      {passportTrend && passportTrend.length > 0 && (
+        <div className="aq-trend-section">
+          <div className="aq-trend-header">
+            <div>
+              <span className="aq-trend-label">Trend (Last 7 Days)</span>
+              <span className="aq-trend-avg">
+                Average score: {Math.round(passportTrend.reduce((acc, d) => acc + d.average, 0) / passportTrend.length)}
+              </span>
+            </div>
+            <span className="aq-trend-samples">Samples: {passportSampleCount ?? 0}</span>
+          </div>
+          <div className="aq-trend-grid">
+            {passportTrend.map((day) => (
+              <div key={day.day} className="aq-trend-day">
+                <span className="aq-trend-day-date">{new Date(day.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                <span className="aq-trend-day-value" style={{ color: getAqiColor(day.average) }}>{day.average}</span>
+                <span className="aq-trend-day-samples">{day.samples} samples</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats Summary */}
       {stats && (

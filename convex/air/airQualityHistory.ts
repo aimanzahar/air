@@ -22,16 +22,16 @@ export const storeReading = mutation({
     const now = Date.now();
     const today = new Date().toISOString().split('T')[0];
     
-    // Check if we already have a reading for this location in the last hour
+    // Check if we already have a reading for this location in the last 15 minutes
     const recentReadings = await ctx.db
       .query("airQualityHistory")
       .withIndex("by_userKey_location", (q) => 
         q.eq("userKey", args.userKey).eq("locationName", args.locationName)
       )
-      .filter((q) => q.gt(q.field("timestamp"), now - 3600000)) // Last hour
+      .filter((q) => q.gt(q.field("timestamp"), now - 900000)) // Last 15 minutes
       .collect();
     
-    // If we have a recent reading, don't store duplicate
+    // If we have a recent reading (within 15 min), don't store duplicate
     if (recentReadings.length > 0) {
       return recentReadings[0]._id;
     }

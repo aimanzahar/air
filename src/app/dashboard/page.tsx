@@ -1245,6 +1245,8 @@ export default function Home() {
             currentPm25={air?.pm25 ?? undefined}
             currentNo2={air?.no2 ?? undefined}
             currentSource={air?.source}
+            passportTrend={insight?.trend}
+            passportSampleCount={insight?.sampleCount}
           />
         </section>
       )}
