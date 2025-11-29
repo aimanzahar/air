@@ -124,13 +124,13 @@ class AirQualityService {
     };
   }
 
-  // Fetch from DOE API
-  private async fetchDOE(mode: 'radius' | 'bounds' | 'all', params: any): Promise<AirQualityStation[]> {
-    const cacheKey = this.getCacheKey('doe', { mode, ...params });
+  // Fetch from combined API with DOE priority
+  private async fetchCombined(mode: 'radius' | 'bounds' | 'all', params: any): Promise<AirQualityStation[]> {
+    const cacheKey = this.getCacheKey('combined', { mode, ...params });
     const cached = this.getCachedData<AirQualityStation[]>(cacheKey);
     if (cached) return cached;
 
-    const url = '/api/doe';
+    const url = '/api/air-quality';
     const body = { mode, ...params };
 
     try {
@@ -140,7 +140,7 @@ class AirQualityService {
         body: JSON.stringify(body)
       });
 
-      if (!res.ok) throw new Error(`DOE API error: ${res.status}`);
+      if (!res.ok) throw new Error(`Air quality API error: ${res.status}`);
 
       const data = await res.json();
       const stations = data.data || [];
@@ -148,7 +148,7 @@ class AirQualityService {
       this.setCachedData(cacheKey, stations, this.config.doe.cacheTimeout);
       return stations;
     } catch (error) {
-      console.error('DOE fetch error:', error);
+      console.error('Combined fetch error:', error);
       return [];
     }
   }
@@ -160,11 +160,11 @@ class AirQualityService {
     if (cached) return cached;
 
     try {
-      // Use DOE API
-      const doeData = await this.fetchDOE('radius', { lat, lng, radius: 0.1, limit: 1 });
-      if (doeData.length > 0) {
-        this.setCachedData(cacheKey, doeData[0]);
-        return doeData[0];
+      // Use combined API (DOE prioritized)
+      const combinedData = await this.fetchCombined('radius', { lat, lng, radius: 0.1, limit: 1 });
+      if (combinedData.length > 0) {
+        this.setCachedData(cacheKey, combinedData[0]);
+        return combinedData[0];
       }
 
       return null;
@@ -202,11 +202,8 @@ class AirQualityService {
     options: { source: 'doe'; limit: number }
   ): Promise<SearchResponse> {
     try {
-      const stations: AirQualityStation[] = [];
-
-      // Fetch from DOE API
-      const doeStations = await this.fetchDOE('radius', { lat, lng, radius: radiusKm, limit: options.limit });
-      stations.push(...doeStations);
+      // Fetch from combined API (DOE prioritized)
+      const stations = await this.fetchCombined('radius', { lat, lng, radius: radiusKm, limit: options.limit });
 
       // Sort by distance and limit
       const sortedStations = stations
@@ -248,11 +245,8 @@ class AirQualityService {
     const { source = 'doe', limit = 100, page = 1 } = options;
 
     try {
-      const stations: AirQualityStation[] = [];
-
-      // Fetch from DOE API
-      const doeStations = await this.fetchDOE('bounds', { bounds, limit, page });
-      stations.push(...doeStations);
+      // Fetch from combined API (DOE prioritized)
+      const stations = await this.fetchCombined('bounds', { bounds, limit, page });
 
       // Calculate summary
       const centerLat = (bounds.north + bounds.south) / 2;

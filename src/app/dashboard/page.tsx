@@ -47,9 +47,13 @@ type AirData = {
   pm25: number | null;
   no2: number | null;
   co: number | null;
+  o3?: number | null;
+  so2?: number | null;
+  pm10?: number | null;
+  aqi?: number;
   unit?: string;
   lastUpdated?: string | null;
-  source?: "waqi" | "openaq" | "doe";
+  source?: "waqi" | "openaq" | "doe" | "error";
 };
 
 type RiskLevel = "low" | "moderate" | "high" | "loading";
@@ -142,6 +146,8 @@ export default function Home() {
   const [areaAirQuality, setAreaAirQuality] = useState<AreaAirQualitySummary | null>(null);
   const [nearbyStations, setNearbyStations] = useState<StationType[]>([]);
   const [isScanningArea, setIsScanningArea] = useState(false);
+  // Pollutant selection state
+  const [selectedPollutant, setSelectedPollutant] = useState<'aqi' | 'pm25' | 'no2' | 'co' | 'o3' | 'so2'>('aqi');
 
   const login = useMutation(api.auth.login);
   const logout = useMutation(api.auth.logout);
@@ -331,34 +337,64 @@ export default function Home() {
   const fetchAir = async (lat: number, lon: number) => {
     setLoadingAir(true);
     try {
-      const res = await fetch("/api/doe", {
+      // Use the combined API that prioritizes DOE data
+      const res = await fetch("/api/air-quality", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lat, lon }),
       });
       const data = await res.json();
 
-      if (res.ok && data.data && data.data.length > 0) {
-        // Get the nearest station
-        const station = data.data[0];
+      if (res.ok && data.location) {
         setAir({
-          location: station.location,
-          city: station.city,
-          country: station.country,
-          pm25: station.pm25,
-          no2: station.no2,
-          co: station.co,
-          unit: "µg/m³",
-          lastUpdated: station.lastUpdated,
-          source: "doe",
+          location: data.location,
+          city: data.city,
+          country: data.country,
+          pm25: data.pm25,
+          no2: data.no2,
+          co: data.co,
+          o3: data.o3,
+          so2: data.so2,
+          unit: data.unit || "µg/m³",
+          lastUpdated: data.lastUpdated,
+          source: data.source || "doe",
+          aqi: data.aqi
         });
-        setStatus(`Live data from DOE Malaysia`);
+
+        // Update status based on data source
+        if (data.source === 'doe') {
+          setStatus(`Live data from DOE Malaysia`);
+        } else if (data.source === 'waqi') {
+          setStatus(`Live data from WAQI (DOE unavailable)`);
+        } else {
+          setStatus(`Live air quality data`);
+        }
       } else {
         setStatus("Air data unavailable — retry or move to better signal");
+        setAir({
+          location: "Unknown Location",
+          pm25: null,
+          no2: null,
+          co: null,
+          unit: "µg/m³",
+          lastUpdated: null,
+          source: "error",
+          aqi: 0
+        });
       }
     } catch (error) {
-      console.error("DOE API error", error);
-      setStatus("DOE API error — retry or change network");
+      console.error("Air quality API error", error);
+      setStatus("Air quality API error — retry or change network");
+      setAir({
+        location: "Unknown Location",
+        pm25: null,
+        no2: null,
+        co: null,
+        unit: "µg/m³",
+        lastUpdated: null,
+        source: "error",
+        aqi: 0
+      });
     } finally {
       setLoadingAir(false);
     }
@@ -702,27 +738,58 @@ export default function Home() {
             <span className="pb-2 text-sm text-slate-500">/100</span>
           </div>
           <p className="mt-3 text-sm text-slate-600">{risk.narrative}</p>
-          <div className="mt-6 grid grid-cols-3 gap-2 text-center text-xs text-slate-600">
-            <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">PM2.5</p>
-              <p className="font-display text-2xl text-slate-900">
-                {formatValue(air?.pm25)}
+          <div className="mt-6">
+            {/* Data Source Indicator */}
+            <div className="flex items-center justify-center mb-3 gap-2">
+              <div className={`h-2 w-2 rounded-full ${air?.source === 'doe' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+              <p className="text-xs text-slate-600">
+                Data Source: <span className="font-semibold uppercase">{air?.source === 'doe' ? 'DOE Malaysia' : 'Alternative'}</span>
               </p>
-              <p className="text-[11px] text-slate-500">µg/m³</p>
+              {air?.lastUpdated && (
+                <span className="text-xs text-slate-400">• {formatTime(air?.lastUpdated)}</span>
+              )}
             </div>
-            <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">NO₂</p>
-              <p className="font-display text-2xl text-slate-900">
-                {formatValue(air?.no2)}
-              </p>
-              <p className="text-[11px] text-slate-500">ppb</p>
-            </div>
-            <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">CO</p>
-              <p className="font-display text-2xl text-slate-900">
-                {formatValue(air?.co)}
-              </p>
-              <p className="text-[11px] text-slate-500">ppm</p>
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-600">
+              <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">PM2.5</p>
+                <p className="font-display text-2xl text-slate-900">
+                  {formatValue(air?.pm25)}
+                </p>
+                <p className="text-[11px] text-slate-500">µg/m³</p>
+              </div>
+              <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">NO₂</p>
+                <p className="font-display text-2xl text-slate-900">
+                  {formatValue(air?.no2)}
+                </p>
+                <p className="text-[11px] text-slate-500">ppb</p>
+              </div>
+              <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">CO</p>
+                <p className="font-display text-2xl text-slate-900">
+                  {formatValue(air?.co)}
+                </p>
+                <p className="text-[11px] text-slate-500">ppm</p>
+              </div>
+              {air?.o3 !== undefined && (
+                <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">O₃</p>
+                  <p className="font-display text-2xl text-slate-900">
+                    {formatValue(air?.o3)}
+                  </p>
+                  <p className="text-[11px] text-slate-500">ppb</p>
+                </div>
+              )}
+              {air?.so2 !== undefined && (
+                <div className="rounded-xl bg-white/80 px-3 py-3 shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">SO₂</p>
+                  <p className="font-display text-2xl text-slate-900">
+                    {formatValue(air?.so2)}
+                  </p>
+                  <p className="text-[11px] text-slate-500">ppb</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -887,8 +954,11 @@ export default function Home() {
                 pm25: air?.pm25 ?? undefined,
                 no2: air?.no2 ?? undefined,
                 co: air?.co ?? undefined,
+                o3: air?.o3 ?? undefined,
+                so2: air?.so2 ?? undefined,
                 aqi: risk.score,
-                location: air?.location ?? "Current Location"
+                location: air?.location ?? "Current Location",
+                source: air?.source ?? "doe"
               },
               ...nearbyStations.map(station => ({
                 lat: station.lat,
@@ -896,8 +966,11 @@ export default function Home() {
                 pm25: station.pm25 ?? undefined,
                 no2: station.no2 ?? undefined,
                 co: station.co ?? undefined,
+                o3: station.o3 ?? undefined,
+                so2: station.so2 ?? undefined,
                 aqi: station.aqi,
-                location: station.name ?? station.location ?? "Unknown Station"
+                location: station.name ?? station.location ?? "Unknown Station",
+                source: station.source
               }))
             ]}
             nearbyStations={[
@@ -927,6 +1000,8 @@ export default function Home() {
             radiusKm={radiusKm}
             isTracking={isTrackingEnabled}
             onZoomChange={handleZoomChange}
+            selectedPollutant={selectedPollutant}
+            onPollutantChange={setSelectedPollutant}
             className="w-full h-full"
           />
         </div>

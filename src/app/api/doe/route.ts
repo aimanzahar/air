@@ -81,18 +81,19 @@ async function fetchAllStations(): Promise<AirQualityStation[]> {
       lat: attrs.LATITUDE,
       lng: attrs.LONGITUDE,
       aqi: attrs.API,
-      pm25: attrs.PARAM_SELECTED === 'PM2.5' ? attrs.API : undefined,
-      no2: attrs.PARAM_SELECTED === 'NO2' ? attrs.API : undefined,
-      co: attrs.PARAM_SELECTED === 'CO' ? attrs.API : undefined,
-      o3: attrs.PARAM_SELECTED === 'O3' ? attrs.API : undefined,
-      so2: attrs.PARAM_SELECTED === 'SO2' ? attrs.API : undefined,
-      lastUpdated: attrs.DATETIME ? new Date(attrs.DATETIME).toISOString() : undefined,
+      // DOE provides direct pollutant values - check for common field names
+      pm25: attrs.PM25 || attrs.pm25 || attrs['PM2.5'] || attrs.PARAM_SELECTED === 'PM2.5' ? attrs.API : undefined,
+      no2: attrs.NO2 || attrs.no2 || attrs.PARAM_SELECTED === 'NO2' ? attrs.API : undefined,
+      co: attrs.CO || attrs.co || attrs.PARAM_SELECTED === 'CO' ? attrs.API : undefined,
+      o3: attrs.O3 || attrs.o3 || attrs.PARAM_SELECTED === 'O3' ? attrs.API : undefined,
+      so2: attrs.SO2 || attrs.so2 || attrs.PARAM_SELECTED === 'SO2' ? attrs.API : undefined,
+        lastUpdated: attrs.DATETIME || attrs.READING_DATETIME ? new Date(attrs.DATETIME || attrs.READING_DATETIME).toISOString() : undefined,
       source: "doe",
       class: attrs.CLASS,
       category: attrs.STATION_CATEGORY,
       state: attrs.STATE_NAME,
-      region: attrs.REGION_NAME
-    });
+      region: attrs.REGION_NAME,
+      });
   }
 
   setCachedData(cacheKey, stations);
@@ -132,18 +133,19 @@ async function searchByBounds(bounds: BoundingBox, limit: number = 100): Promise
       lat: attrs.LATITUDE,
       lng: attrs.LONGITUDE,
       aqi: attrs.API,
-      pm25: attrs.PARAM_SELECTED === 'PM2.5' ? attrs.API : undefined,
-      no2: attrs.PARAM_SELECTED === 'NO2' ? attrs.API : undefined,
-      co: attrs.PARAM_SELECTED === 'CO' ? attrs.API : undefined,
-      o3: attrs.PARAM_SELECTED === 'O3' ? attrs.API : undefined,
-      so2: attrs.PARAM_SELECTED === 'SO2' ? attrs.API : undefined,
-      lastUpdated: attrs.DATETIME ? new Date(attrs.DATETIME).toISOString() : undefined,
+      // DOE provides direct pollutant values - check for common field names
+      pm25: attrs.PM25 || attrs.pm25 || attrs['PM2.5'] || attrs.PARAM_SELECTED === 'PM2.5' ? attrs.API : undefined,
+      no2: attrs.NO2 || attrs.no2 || attrs.PARAM_SELECTED === 'NO2' ? attrs.API : undefined,
+      co: attrs.CO || attrs.co || attrs.PARAM_SELECTED === 'CO' ? attrs.API : undefined,
+      o3: attrs.O3 || attrs.o3 || attrs.PARAM_SELECTED === 'O3' ? attrs.API : undefined,
+      so2: attrs.SO2 || attrs.so2 || attrs.PARAM_SELECTED === 'SO2' ? attrs.API : undefined,
+        lastUpdated: attrs.DATETIME || attrs.READING_DATETIME ? new Date(attrs.DATETIME || attrs.READING_DATETIME).toISOString() : undefined,
       source: "doe",
       class: attrs.CLASS,
       category: attrs.STATION_CATEGORY,
       state: attrs.STATE_NAME,
-      region: attrs.REGION_NAME
-    });
+      region: attrs.REGION_NAME,
+      });
 
     if (stations.length >= limit) break;
   }

@@ -35,8 +35,12 @@ interface AirQualityData {
   pm25?: number;
   no2?: number;
   co?: number;
+  o3?: number;
+  so2?: number;
+  pm10?: number;
   aqi?: number;
   location: string;
+  source?: string;
 }
 
 interface AirQualityMapProps {
@@ -51,6 +55,8 @@ interface AirQualityMapProps {
   isTracking?: boolean;
   onZoomChange?: (zoom: number) => void;
   onRadiusChange?: (radius: number) => void;
+  selectedPollutant?: 'aqi' | 'pm25' | 'no2' | 'co' | 'o3' | 'so2';
+  onPollutantChange?: (pollutant: 'aqi' | 'pm25' | 'no2' | 'co' | 'o3' | 'so2') => void;
 }
 
 const MapController = ({ center, zoom }: { center: Location; zoom: number }) => {
@@ -104,6 +110,8 @@ export default function AirQualityMap({
   isTracking = false,
   onZoomChange,
   onRadiusChange,
+  selectedPollutant = 'aqi',
+  onPollutantChange,
 }: AirQualityMapProps) {
   const [mapLayer, setMapLayer] = useState("street");
   const [zoom, setZoom] = useState(13);
@@ -232,6 +240,25 @@ export default function AirQualityMap({
             Heatmap
           </label>
         </div>
+
+        {/* Pollutant Selector */}
+        {showHeatmap && (
+          <div className="border-t pt-2">
+            <div className="text-xs font-medium text-gray-700 mb-1">Pollutant</div>
+            <select
+              value={selectedPollutant}
+              onChange={(e) => onPollutantChange?.(e.target.value as any)}
+              className="w-full px-2 py-1 text-xs border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="aqi">AQI</option>
+              <option value="pm25">PM2.5</option>
+              <option value="no2">NO₂</option>
+              <option value="co">CO</option>
+              <option value="o3">O₃</option>
+              <option value="so2">SO₂</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Custom Zoom Control with Radius Display */}
@@ -372,7 +399,7 @@ export default function AirQualityMap({
 
         {/* Heatmap Layer */}
         {showHeatmap && airQualityData && airQualityData.length > 0 && (
-          <HeatmapLayer data={airQualityData} />
+          <HeatmapLayer data={airQualityData} selectedPollutant={selectedPollutant} />
         )}
       </MapContainer>
     </div>
