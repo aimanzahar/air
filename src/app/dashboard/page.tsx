@@ -24,6 +24,7 @@ import {
   type Location,
   type LocationServiceCallbacks
 } from "../../lib/locationService";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   airQualityService,
   type AreaAirQualitySummary,
@@ -115,9 +116,9 @@ const formatTime = (iso?: string | null) => {
 };
 
 export default function Home() {
+  const { isAuthenticated, user, sessionToken, setSessionToken } = useAuth();
   const [userKey, setUserKey] = useState<string | null>(null);
   const [guestKey, setGuestKey] = useState<string | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [coords, setCoords] = useState(fallback);
   const [air, setAir] = useState<AirData | null>(null);
   const [loadingAir, setLoadingAir] = useState(true);
@@ -154,18 +155,8 @@ export default function Home() {
   const ensureProfile = useMutation(api.passport.ensureProfile);
   const logExposure = useMutation(api.passport.logExposure);
 
-  const session = useQuery(
-    api.auth.session,
-    sessionToken ? { token: sessionToken } : "skip",
-  );
-
-  useEffect(() => {
-    if (session === null && sessionToken) {
-      localStorage.removeItem("air-session-token");
-      setSessionToken(null);
-      setStatus("Session expired, using guest profile");
-    }
-  }, [session, sessionToken]);
+  // Session is now managed by AuthContext
+  const session = user ? { user } : null;
 
   const passport = useQuery(
     api.passport.getPassport,
@@ -179,9 +170,6 @@ export default function Home() {
   const risk = useMemo(() => scoreAir(air), [air]);
 
   useEffect(() => {
-    const storedSession = localStorage.getItem("air-session-token");
-    if (storedSession) setSessionToken(storedSession);
-
     const existing = localStorage.getItem("air-passport-key");
     if (existing) {
       setGuestKey(existing);
@@ -193,13 +181,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (session?.userKey) {
-      setUserKey(session.userKey);
-      localStorage.setItem("air-passport-key", session.userKey);
+    // Set userKey from localStorage if it exists, otherwise use guestKey
+    const storedKey = localStorage.getItem("air-passport-key");
+    if (storedKey) {
+      setUserKey(storedKey);
     } else if (guestKey) {
       setUserKey(guestKey);
     }
-  }, [session?.userKey, guestKey]);
+  }, [guestKey]);
 
   useEffect(() => {
     setProfileReady(false);
@@ -483,7 +472,6 @@ export default function Home() {
     setAuthMessage("");
     try {
       const res = await login({ email: authEmail, password: authPassword });
-      localStorage.setItem("air-session-token", res.token);
       setSessionToken(res.token);
       setAuthMessage("Signed in and synced ✅");
       setStatus("Signed in via Convex auth");
@@ -501,7 +489,6 @@ export default function Home() {
     try {
       if (sessionToken) await logout({ token: sessionToken });
     } finally {
-      localStorage.removeItem("air-session-token");
       setSessionToken(null);
       if (guestKey) {
         setUserKey(guestKey);
@@ -564,7 +551,7 @@ export default function Home() {
     ];
   }, [passport?.profile?.points, passport?.profile?.streak, risk.level]);
 
-  const isSignedIn = Boolean(session?.user);
+  // isSignedIn is now replaced with isAuthenticated from AuthContext
 
   const scrollToPassport = () => {
     if (passportRef.current) {
@@ -616,11 +603,11 @@ export default function Home() {
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Account</p>
           <h2 className="text-lg font-semibold text-slate-900">
-            {isSignedIn ? "You're synced. Keep exploring." : "Sign in to keep your passport synced"}
+            {isAuthenticated ? "You're synced. Keep exploring." : "Sign in to keep your passport synced"}
           </h2>
           <p className="text-sm text-slate-700">
-            {isSignedIn
-              ? `Signed in as ${session?.user?.email}. Your streaks and badges stay backed up.`
+            {isAuthenticated
+              ? `Signed in as ${user?.email}. Your streaks and badges stay backed up.`
               : "Guest mode is active. Sign in to save streaks and rewards across devices."}
           </p>
           <div className="flex flex-wrap gap-2 text-xs text-slate-600">
@@ -637,7 +624,7 @@ export default function Home() {
           )}
         </div>
 
-        {isSignedIn ? (
+        {isAuthenticated ? (
           <div className="flex w-full flex-wrap items-center gap-2 text-sm md:max-w-[480px]">
             <button
               onClick={scrollToPassport}

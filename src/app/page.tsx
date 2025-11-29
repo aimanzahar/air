@@ -1,3 +1,5 @@
+"use client";
+
 import {
   ArrowLongRightIcon,
   BoltIcon,
@@ -9,6 +11,7 @@ import {
   TrophyIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
 
 const pillars = [
   {
@@ -47,6 +50,7 @@ const steps = [
 ];
 
 export default function Landing() {
+  const { isAuthenticated, user, isLoading } = useAuth();
   const appName = "NafasLokal";
 
   return (
@@ -66,19 +70,40 @@ export default function Landing() {
             for low-exposure days. Built for KL heat, haze, and rapid metro hops.
           </p>
           <div className="initial-hidden animate-slide-up delay-300 flex flex-wrap gap-3">
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-xl"
-            >
-              Launch live dashboard
-              <ArrowLongRightIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-            </Link>
-            <Link
-              href="/register"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-800 transition-all duration-300 hover:scale-105 hover:bg-white hover:shadow-lg"
-            >
-              Create account
-            </Link>
+            {!isLoading && (
+              <>
+                {isAuthenticated ? (
+                  <>
+                    <Link
+                      href="/dashboard"
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-xl"
+                    >
+                      Continue to dashboard
+                      <ArrowLongRightIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                    </Link>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-semibold text-emerald-700">
+                      Welcome back, {user?.name || user?.email?.split('@')[0]}!
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Link
+                      href="/dashboard"
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-xl"
+                    >
+                      Launch live dashboard
+                      <ArrowLongRightIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                    </Link>
+                    <Link
+                      href="/register"
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-5 py-3 text-sm font-semibold text-slate-800 transition-all duration-300 hover:scale-105 hover:bg-white hover:shadow-lg"
+                    >
+                      Create account
+                    </Link>
+                  </>
+                )}
+              </>
+            )}
           </div>
           <div className="initial-hidden animate-fade-in delay-400 flex flex-wrap gap-2 text-xs text-slate-600">
             <span className="pill transition-transform duration-300 hover:scale-110">WAQI + OpenAQ</span>
@@ -193,18 +218,33 @@ export default function Landing() {
             ))}
           </div>
           <div className="mt-5 flex flex-wrap gap-3 text-sm">
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-lg"
-            >
-              Open dashboard
-            </Link>
-            <Link
-              href="/register"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 font-semibold text-slate-700 transition-all duration-300 hover:scale-105 hover:bg-white hover:shadow-md"
-            >
-              Create account
-            </Link>
+            {!isLoading && (
+              <>
+                {isAuthenticated ? (
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-lg"
+                  >
+                    Continue to dashboard
+                  </Link>
+                ) : (
+                  <>
+                    <Link
+                      href="/dashboard"
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-lg"
+                    >
+                      Open dashboard
+                    </Link>
+                    <Link
+                      href="/register"
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 font-semibold text-slate-700 transition-all duration-300 hover:scale-105 hover:bg-white hover:shadow-md"
+                    >
+                      Create account
+                    </Link>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -255,18 +295,33 @@ export default function Landing() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
-            <Link
-              href="/dashboard"
-              className="rounded-full bg-white px-4 py-2 font-semibold text-slate-900 shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-50 hover:shadow-md"
-            >
-              Open dashboard
-            </Link>
-            <Link
-              href="/register"
-              className="rounded-full border border-white/30 px-4 py-2 font-semibold text-white transition-all duration-300 hover:scale-105 hover:bg-white/10"
-            >
-              Create account
-            </Link>
+            {!isLoading && (
+              <>
+                {isAuthenticated ? (
+                  <Link
+                    href="/dashboard"
+                    className="rounded-full bg-white px-4 py-2 font-semibold text-slate-900 shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-50 hover:shadow-md"
+                  >
+                    Continue to dashboard
+                  </Link>
+                ) : (
+                  <>
+                    <Link
+                      href="/dashboard"
+                      className="rounded-full bg-white px-4 py-2 font-semibold text-slate-900 shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-50 hover:shadow-md"
+                    >
+                      Open dashboard
+                    </Link>
+                    <Link
+                      href="/register"
+                      className="rounded-full border border-white/30 px-4 py-2 font-semibold text-white transition-all duration-300 hover:scale-105 hover:bg-white/10"
+                    >
+                      Create account
+                    </Link>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
       </section>
