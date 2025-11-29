@@ -628,43 +628,26 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="card initial-hidden animate-slide-up delay-100 flex flex-col gap-5 rounded-2xl p-5 transition-all duration-300 hover:shadow-xl md:flex-row md:items-center md:justify-between">
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Account</p>
-          <h2 className="text-lg font-semibold text-slate-900">
-            {isAuthenticated ? "You're synced. Keep exploring." : "Sign in to keep your passport synced"}
-          </h2>
-          <p className="text-sm text-slate-700">
-            {isAuthenticated
-              ? `Signed in as ${user?.email}. Your streaks and badges stay backed up.`
-              : "Guest mode is active. Sign in to save streaks and rewards across devices."}
-          </p>
-          {authMessage && (
-            <p
-              className={`text-xs ${/fail|error|invalid/i.test(authMessage) ? "text-rose-700" : "text-emerald-700"}`}
-            >
-              {authMessage}
+      {/* Account Section - Only show when not authenticated */}
+      {!isAuthenticated && (
+        <section className="card initial-hidden animate-slide-up delay-100 flex flex-col gap-5 rounded-2xl p-5 transition-all duration-300 hover:shadow-xl md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Account</p>
+            <h2 className="text-lg font-semibold text-slate-900">
+              Sign in to keep your passport synced
+            </h2>
+            <p className="text-sm text-slate-700">
+              Guest mode is active. Sign in to save streaks and rewards across devices.
             </p>
-          )}
-        </div>
-
-        {isAuthenticated ? (
-          <div className="flex w-full flex-wrap items-center gap-2 text-sm md:max-w-[480px]">
-            <button
-              onClick={scrollToPassport}
-              className="rounded-full bg-slate-900 px-4 py-2 font-semibold text-white shadow-sm transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-md"
-            >
-              Open dashboard
-            </button>
-            <button
-              onClick={handleLogout}
-              className="rounded-full border border-rose-200 px-4 py-2 font-semibold text-rose-600 transition-all duration-300 hover:scale-105 hover:bg-rose-50 hover:shadow-sm"
-              disabled={authLoading}
-            >
-              Sign out
-            </button>
+            {authMessage && (
+              <p
+                className={`text-xs ${/fail|error|invalid/i.test(authMessage) ? "text-rose-700" : "text-emerald-700"}`}
+              >
+                {authMessage}
+              </p>
+            )}
           </div>
-        ) : (
+
           <div className="flex w-full flex-col gap-3 md:max-w-[480px]">
             <div className="grid w-full gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
@@ -715,8 +698,8 @@ export default function Home() {
               Registration now lives on its own page so you can focus on a calm, single-task flow.
             </p>
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3" ref={passportRef} id="passport">
         <div className="card initial-hidden animate-slide-up delay-200 hover-lift col-span-1 rounded-2xl p-5">
