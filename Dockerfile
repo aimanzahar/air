@@ -22,4 +22,4 @@ ENV HOSTNAME=0.0.0.0
 EXPOSE 3000
 
 # Default to dev mode - bind to 0.0.0.0 for Docker, disable turbopack for stability
-CMD ["npx", "next", "dev", "-H", "0.0.0.0", "--turbopack=false"]
+CMD ["npx", "next", "dev", "-H", "0.0.0.0", "--no-turbopack"]
