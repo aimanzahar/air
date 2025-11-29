@@ -69,15 +69,27 @@ async function fetchFromWAQI(lat: number, lng: number, radius?: number, bounds?:
 }
 
 async function getSingleStation(lat: number, lng: number): Promise<AirQualityStation | null> {
-  // Try DOE first
-  const doeStations = await fetchFromDOE(lat, lng, 0.1);
+  // Try DOE first with a larger radius to find the nearest station
+  const doeStations = await fetchFromDOE(lat, lng, 10); // 10km radius
   if (doeStations.length > 0) {
+    // Sort by distance and return the closest
+    doeStations.sort((a, b) => {
+      const distA = calculateDistance(lat, lng, a.lat, a.lng);
+      const distB = calculateDistance(lat, lng, b.lat, b.lng);
+      return distA - distB;
+    });
     return doeStations[0];
   }
 
-  // Fallback to WAQI
-  const waqiStations = await fetchFromWAQI(lat, lng, 0.1);
+  // Fallback to WAQI with larger radius
+  const waqiStations = await fetchFromWAQI(lat, lng, 10); // 10km radius
   if (waqiStations.length > 0) {
+    // Sort by distance and return the closest
+    waqiStations.sort((a, b) => {
+      const distA = calculateDistance(lat, lng, a.lat, a.lng);
+      const distB = calculateDistance(lat, lng, b.lat, b.lng);
+      return distA - distB;
+    });
     return waqiStations[0];
   }
 
@@ -89,9 +101,38 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { lat, lng, radius, limit, mode, bounds } = body;
 
-    if (typeof lat !== "number" || typeof lng !== "number") {
+
+    // Enhanced validation with better error messages
+    if (lat === undefined || lat === null || lng === undefined || lng === null) {
       return NextResponse.json(
-        { error: "lat and lng are required numbers" },
+        { 
+          error: "Missing coordinates",
+          message: "Latitude and longitude are required. Please provide valid lat and lng values.",
+          received: { lat, lng }
+        },
+        { status: 400 }
+      );
+    }
+
+    if (typeof lat !== "number" || typeof lng !== "number" || isNaN(lat) || isNaN(lng)) {
+      return NextResponse.json(
+        { 
+          error: "Invalid coordinates",
+          message: "Latitude and longitude must be valid numbers.",
+          received: { lat, lng, latType: typeof lat, lngType: typeof lng }
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate coordinate ranges
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return NextResponse.json(
+        { 
+          error: "Coordinates out of range",
+          message: "Latitude must be between -90 and 90, longitude must be between -180 and 180.",
+          received: { lat, lng }
+        },
         { status: 400 }
       );
     }
@@ -182,7 +223,11 @@ export async function POST(req: Request) {
       // Default: single station with DOE priority
       const station = await getSingleStation(lat, lng);
       if (!station) {
-        return NextResponse.json({ error: "No air quality data available" }, { status: 502 });
+        return NextResponse.json({ 
+          error: "No air quality data available",
+          message: "Could not find air quality stations near your location. Try again with a different location.",
+          coordinates: { lat, lng }
+        }, { status: 502 });
       }
 
       return NextResponse.json({
@@ -203,7 +248,11 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("Combined air quality API error", error);
     return NextResponse.json(
-      { error: "Unexpected error fetching air quality data" },
+      { 
+        error: "Unexpected error fetching air quality data",
+        message: "An unexpected error occurred while fetching air quality data. Please try again later.",
+        details: error instanceof Error ? error.message : "Unknown error"
+      },
       { status: 500 }
     );
   }

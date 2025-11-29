@@ -226,22 +226,32 @@ export default function Home() {
     let errorMessage = "Location error";
     switch (error.code) {
       case error.PERMISSION_DENIED:
-        errorMessage = "Location permission denied";
+        errorMessage = "Location permission denied. Using default location.";
         setIsTrackingEnabled(false);
+        // Use fallback coordinates when permission is denied
+        setCoords(fallback);
+        fetchAir(fallback.lat, fallback.lon);
         break;
       case error.POSITION_UNAVAILABLE:
-        errorMessage = "Location unavailable";
+        errorMessage = "Location unavailable. Using default location.";
+        setCoords(fallback);
+        fetchAir(fallback.lat, fallback.lon);
         break;
       case error.TIMEOUT:
-        errorMessage = "Location request timeout";
+        errorMessage = "Location request timeout. Using default location.";
+        setCoords(fallback);
+        fetchAir(fallback.lat, fallback.lon);
         break;
     }
     setStatus(errorMessage);
   }, []);
 
   const handlePermissionDenied = useCallback(() => {
-    setStatus("Location permission denied. Enable in browser settings.");
+    setStatus("Location permission denied. Enable in browser settings to use your location. Using default location for now.");
     setIsTrackingEnabled(false);
+    // Ensure we use fallback coordinates
+    setCoords(fallback);
+    fetchAir(fallback.lat, fallback.lon);
   }, []);
 
   // Start/stop GPS tracking
@@ -287,7 +297,7 @@ export default function Home() {
   useEffect(() => {
     if (!userKey) return;
     if (!locationService.isSupported()) {
-      setStatus("GPS unavailable, using fallback city");
+      setStatus("GPS unavailable, using default location (Kuala Lumpur)");
       setCoords(fallback);
       fetchAir(fallback.lat, fallback.lon);
       return;
@@ -309,7 +319,7 @@ export default function Home() {
         setStatus("Live location locked");
       },
       () => {
-        setStatus("Using fallback city");
+        setStatus("Using default location (Kuala Lumpur) - GPS unavailable or denied");
         setCoords(fallback);
         fetchAir(fallback.lat, fallback.lon);
       }
@@ -325,7 +335,19 @@ export default function Home() {
 
   const fetchAir = async (lat: number, lon: number) => {
     setLoadingAir(true);
+    
     try {
+      // Ensure coordinates are valid numbers before making API call
+      if (typeof lat !== "number" || typeof lon !== "number" || isNaN(lat) || isNaN(lon)) {
+        console.error("[DEBUG] Dashboard - Invalid coordinates provided:", { lat, lon });
+        // Use fallback coordinates if invalid
+        console.log("[DEBUG] Dashboard - Using fallback coordinates due to invalid input");
+        lat = fallback.lat;
+        lon = fallback.lon;
+      }
+      
+      console.log("[DEBUG] Dashboard - Fetching air data for coordinates:", { lat, lon });
+      
       // Use the combined API that prioritizes DOE data
       const res = await fetch("/api/air-quality", {
         method: "POST",
@@ -333,6 +355,7 @@ export default function Home() {
         body: JSON.stringify({ lat, lon }),
       });
       const data = await res.json();
+
 
       if (res.ok && data.location) {
         setAir({
@@ -352,9 +375,11 @@ export default function Home() {
 
         // Update status based on data source
         if (data.source === 'doe') {
-          setStatus(`Live data from DOE Malaysia`);
+          setStatus(`Live data from DOE Malaysia • Nearest station found`);
         } else if (data.source === 'waqi') {
-          setStatus(`Live data from WAQI (DOE unavailable)`);
+          setStatus(`Live data from WAQI • Nearest station found`);
+        } else if (data.source === 'error') {
+          setStatus(`Error fetching air quality data`);
         } else {
           setStatus(`Live air quality data`);
         }
@@ -372,7 +397,6 @@ export default function Home() {
         });
       }
     } catch (error) {
-      console.error("Air quality API error", error);
       setStatus("Air quality API error — retry or change network");
       setAir({
         location: "Unknown Location",
@@ -457,7 +481,12 @@ export default function Home() {
       });
       setStatus("Saved commute, streak updated");
       // Refresh air data for freshness
-      fetchAir(coords.lat, coords.lon);
+      if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+        fetchAir(coords.lat, coords.lon);
+      } else {
+        console.warn("[DEBUG] Dashboard - Invalid coords state, using fallback for refresh");
+        fetchAir(fallback.lat, fallback.lon);
+      }
     } finally {
       setSaving(false);
     }
@@ -588,7 +617,7 @@ export default function Home() {
           </span>
           <span className="pill inline-flex items-center gap-2 transition-all duration-300 hover:scale-105">
             <SparklesIcon className="h-4 w-4" />
-            Source: {air?.source === "doe" ? "DOE Malaysia" : air?.source === "waqi" ? "WAQI" : "OpenAQ"}
+            Source: {air?.source === "doe" ? "DOE Malaysia" : air?.source === "waqi" ? "WAQI" : air?.source === "error" ? "Error" : "Alternative"}
           </span>
           {isTrackingEnabled && (
             <span className="pill inline-flex items-center gap-2 bg-emerald-50 text-emerald-700">
@@ -723,9 +752,13 @@ export default function Home() {
           <div className="mt-6">
             {/* Data Source Indicator */}
             <div className="flex items-center justify-center mb-3 gap-2">
-              <div className={`h-2 w-2 rounded-full ${air?.source === 'doe' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+              <div className={`h-2 w-2 rounded-full ${air?.source === 'doe' ? 'bg-green-500' : air?.source === 'waqi' ? 'bg-blue-500' : 'bg-gray-500'}`}></div>
               <p className="text-xs text-slate-600">
-                Data Source: <span className="font-semibold uppercase">{air?.source === 'doe' ? 'DOE Malaysia' : 'Alternative'}</span>
+                Data Source: <span className="font-semibold uppercase">
+                  {air?.source === 'doe' ? 'DOE Malaysia' :
+                   air?.source === 'waqi' ? 'WAQI' :
+                   air?.source === 'error' ? 'Error' : 'Alternative'}
+                </span>
               </p>
               {air?.lastUpdated && (
                 <span className="text-xs text-slate-400">• {formatTime(air?.lastUpdated)}</span>
@@ -1047,7 +1080,14 @@ export default function Home() {
             </div>
             <button
               className="group inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-lg"
-              onClick={() => fetchAir(coords.lat, coords.lon)}
+              onClick={() => {
+                if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+                  fetchAir(coords.lat, coords.lon);
+                } else {
+                  console.warn("[DEBUG] Dashboard - Invalid coords on refresh button, using fallback");
+                  fetchAir(fallback.lat, fallback.lon);
+                }
+              }}
             >
               <ArrowPathIcon className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
               Refresh AQ
