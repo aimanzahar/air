@@ -42,7 +42,7 @@ RUN echo "#!/bin/sh" > deploy-and-start.sh && \
     echo "if [ ! -z \"\$CONVEX_DEPLOY_KEY\" ] && [ ! -z \"\$NEXT_PUBLIC_CONVEX_URL\" ]; then" >> deploy-and-start.sh && \
     echo "  echo 'Convex configuration found, deploying functions...'" >> deploy-and-start.sh && \
     echo "  echo 'Using Convex URL: '\$CONVEX_SELF_HOSTED_URL" >> deploy-and-start.sh && \
-    echo "  CONVEX_SELF_HOSTED_URL=\$CONVEX_SELF_HOSTED_URL npx convex deploy --admin-key \$CONVEX_SELF_HOSTED_ADMIN_KEY --yes" >> deploy-and-start.sh && \
+    echo "  CONVEX_DEPLOYMENT=\$CONVEX_SELF_HOSTED_URL CONVEX_SELF_HOSTED_URL=\$CONVEX_SELF_HOSTED_URL npx convex deploy --admin-key \$CONVEX_SELF_HOSTED_ADMIN_KEY --yes" >> deploy-and-start.sh && \
     echo "  if [ \$? -eq 0 ]; then" >> deploy-and-start.sh && \
     echo "    echo '✅ Convex deployment successful!'" >> deploy-and-start.sh && \
     echo "  else" >> deploy-and-start.sh && \
