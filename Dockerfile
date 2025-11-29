@@ -25,10 +25,16 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
+
+# Copy all source files for dev mode support
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/convex ./convex
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/next.config.ts ./
+COPY --from=builder /app/tsconfig.json ./
+COPY --from=builder /app/postcss.config.mjs ./
 COPY --from=deps /app/node_modules ./node_modules
 
 # Install curl for health check

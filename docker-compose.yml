@@ -2,13 +2,11 @@ version: "3.9"
 
 services:
   web:
-    image: node:20-alpine
-    working_dir: /app
-    volumes:
-      - .:/app
-      - web_node_modules:/app/node_modules
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: air-app
-    command: sh -c "npm install && npm run dev"
+    command: ["npm", "run", "dev"]
     environment:
       NODE_ENV: development
       NEXT_TELEMETRY_DISABLED: "1"
@@ -80,4 +78,3 @@ networks:
 
 volumes:
   convex_node_modules:
-  web_node_modules:
