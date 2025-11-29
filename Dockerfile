@@ -1,25 +1,32 @@
 # syntax=docker/dockerfile:1
 
-# Dev mode Dockerfile - skips production build
-FROM node:20-alpine
-
+# Production mode Dockerfile
+FROM node:20-alpine AS deps
 WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
 
 # Install curl for health check
 RUN apk add --no-cache curl
 
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN npm ci
-
-# Copy all source files
-COPY . .
-
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3000
 
-# Default to dev mode - bind to 0.0.0.0 for Docker
-CMD ["npx", "next", "dev", "-H", "0.0.0.0"]
+CMD ["npm", "start"]
