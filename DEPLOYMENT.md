@@ -53,6 +53,13 @@ Before deploying, set these environment variables in Portainer:
    NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
    CONVEX_DEPLOY_KEY=convex_your_deployment_key_here
    ```
+   For self-hosted Convex, use:
+   ```env
+   NEXT_PUBLIC_CONVEX_URL=https://your-self-hosted-url
+   CONVEX_SELF_HOSTED_URL=https://your-self-hosted-url
+   CONVEX_PRODUCTION_URL=https://your-self-hosted-url
+   CONVEX_SELF_HOSTED_ADMIN_KEY=<self-hosted admin key>
+   ```
 
 3. **Deploy to Portainer**
    - In Portainer, go to Stacks
@@ -78,7 +85,7 @@ The application is configured to automatically deploy Convex functions:
 
 1. **During Build**: Functions are deployed if `CONVEX_DEPLOY_KEY` is present
 2. **At Runtime**: Functions are deployed again when the container starts via `scripts/start.sh`
-3. **Required**: If no deploy key is provided, the container will exit and log the missing key so you don’t serve a broken app
+3. **Required**: If no deploy/admin key is provided, the container will exit and log the missing key so you don’t serve a broken app
 
 ## Verification
 

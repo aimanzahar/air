@@ -18,8 +18,9 @@ services:
       NEXT_PUBLIC_CONVEX_URL: "https://convex.zahar.my"
       CONVEX_SELF_HOSTED_URL: "https://convex.zahar.my"
       CONVEX_PRODUCTION_URL: "https://convex.zahar.my"
-      CONVEX_DEPLOY_KEY: ${CONVEX_DEPLOY_KEY}
-      CONVEX_SELF_HOSTED_ADMIN_KEY: ${CONVEX_DEPLOY_KEY}
+      # Use a self-hosted admin key for deploys; fall back to deploy key if needed.
+      CONVEX_SELF_HOSTED_ADMIN_KEY: ${CONVEX_SELF_HOSTED_ADMIN_KEY:-}
+      CONVEX_DEPLOY_KEY: ${CONVEX_DEPLOY_KEY:-}
       # AI/OpenAI configuration for chat and AI health
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://apipro.maynor1024.live}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
