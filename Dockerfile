@@ -28,9 +28,15 @@ RUN apk add --no-cache curl
 
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/convex ./convex
+COPY --from=builder /app/convex.json ./convex.json
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 
+RUN chmod +x scripts/start.sh
+
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["./scripts/start.sh"]
