@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Query session using Convex - wrap in try/catch via error handling
-  let session;
+  let session: { user: User } | null | undefined = undefined;
   let queryError: Error | null = null;
   
   try {

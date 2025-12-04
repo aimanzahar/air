@@ -40,11 +40,18 @@ export const ensureProfile = mutation({
     userKey: v.string(),
     nickname: v.optional(v.string()),
     homeCity: v.optional(v.string()),
+    userId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    const derivedUserId = args.userKey.startsWith("user-")
-      ? (args.userKey.slice(5) as Id<"users">)
-      : undefined;
+    // Validate that userId references an existing user if provided
+    let validatedUserId: Id<"users"> | undefined = undefined;
+    if (args.userId) {
+      const user = await ctx.db.get(args.userId);
+      if (user) {
+        validatedUserId = args.userId;
+      }
+    }
+
     const existing = await ctx.db
       .query("profiles")
       .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
@@ -58,7 +65,7 @@ export const ensureProfile = mutation({
       }> = {};
       if (args.nickname) patch.nickname = args.nickname;
       if (args.homeCity) patch.homeCity = args.homeCity;
-      if (!existing.userId && derivedUserId) patch.userId = derivedUserId;
+      if (!existing.userId && validatedUserId) patch.userId = validatedUserId;
       if (Object.keys(patch).length > 0) {
         await ctx.db.patch(existing._id, patch);
       }
@@ -67,7 +74,7 @@ export const ensureProfile = mutation({
 
     const profile = await ctx.db.insert("profiles", {
       userKey: args.userKey,
-      userId: derivedUserId,
+      userId: validatedUserId,
       nickname: args.nickname,
       homeCity: args.homeCity,
       points: 0,
