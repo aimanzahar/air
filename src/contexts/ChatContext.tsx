@@ -7,6 +7,7 @@ interface ChatContextType {
   healthProfile: HealthProfile | null;
   isOpen: boolean;
   isLoading: boolean;
+  isStreaming: boolean;
   error: string | null;
   openChat: () => void;
   closeChat: () => void;
@@ -14,6 +15,14 @@ interface ChatContextType {
   updateHealthProfile: (profile: HealthProfile) => void;
   clearChat: () => void;
   retryLastMessage: () => Promise<void>;
+}
+
+// Type for streaming chunk from API
+interface StreamChunk {
+  type: 'chunk' | 'done' | 'error' | 'air_quality';
+  content?: string;
+  airQualityData?: AirQualityContext;
+  error?: string;
 }
 
 interface ChatProviderProps {
@@ -129,8 +138,30 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
+
+  // Function to update a streaming message's content
+  const updateStreamingMessage = useCallback((messageId: string, content: string, airQualityData?: AirQualityContext) => {
+    setMessages(prev => {
+      const newMessages = [...prev];
+      const messageIndex = newMessages.findIndex(m => m.id === messageId);
+      
+      if (messageIndex !== -1) {
+        newMessages[messageIndex] = {
+          ...newMessages[messageIndex],
+          content,
+          metadata: airQualityData ? {
+            ...newMessages[messageIndex].metadata,
+            airQualityData,
+          } : newMessages[messageIndex].metadata,
+        };
+      }
+      
+      return newMessages;
+    });
+  }, []);
 
   // Save messages to localStorage whenever they change
   useEffect(() => {
@@ -242,9 +273,19 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       timestamp: new Date(),
     };
 
-    // Add messages to state
-    setMessages(prev => [...prev, userMessage, thinkingMessage]);
+    // Create streaming message placeholder (will be updated as chunks arrive)
+    const streamingMessageId = `assistant-${Date.now()}`;
+    const streamingMessage: ChatMessage = {
+      id: streamingMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+    };
+
+    // Add user message and streaming placeholder
+    setMessages(prev => [...prev, userMessage, streamingMessage]);
     setIsLoading(true);
+    setIsStreaming(true);
 
     try {
       // Prepare request payload
@@ -253,11 +294,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         sessionId,
         location,
         healthProfile: healthProfile || undefined,
-        conversationHistory: [...messages, userMessage], // Don't include thinking message
+        conversationHistory: [...messages, userMessage],
       };
 
-      // Call chat API
-      const response = await fetch('/api/chat', {
+      // Call streaming chat API
+      const response = await fetch('/api/chat?stream=true', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -270,43 +311,79 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      const data: ChatResponse = await response.json();
-      
-      // Log the received data
-      console.log('[DEBUG] Received response from API:', data);
-      console.log('[DEBUG] Main message content:', data.message.content);
+      // Read the stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
 
-      // Replace thinking message with actual response
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+      let airQualityData: AirQualityContext | undefined;
+
+      // Hide loading indicator once streaming starts
+      setIsLoading(false);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        
+        // Parse SSE data lines
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const data: StreamChunk = JSON.parse(line.slice(6));
+              
+              if (data.type === 'chunk' && data.content) {
+                accumulatedContent += data.content;
+                updateStreamingMessage(streamingMessageId, accumulatedContent, airQualityData);
+              } else if (data.type === 'air_quality' && data.airQualityData) {
+                airQualityData = data.airQualityData;
+                updateStreamingMessage(streamingMessageId, accumulatedContent, airQualityData);
+              } else if (data.type === 'error') {
+                throw new Error(data.error || 'Streaming error');
+              }
+              // 'done' type is handled by stream ending
+            } catch (parseError) {
+              // Skip lines that can't be parsed (might be partial chunks)
+              if (line.trim() && !line.includes('[DONE]')) {
+                console.warn('Failed to parse SSE line:', line, parseError);
+              }
+            }
+          }
+        }
+      }
+
+      // Finalize the message
       setMessages(prev => {
         const newMessages = [...prev];
-        const thinkingIndex = newMessages.findIndex(m => m.id === thinkingMessage.id);
+        const messageIndex = newMessages.findIndex(m => m.id === streamingMessageId);
         
-        if (thinkingIndex !== -1) {
-          newMessages[thinkingIndex] = {
-            ...data.message,
+        if (messageIndex !== -1) {
+          newMessages[messageIndex] = {
+            ...newMessages[messageIndex],
+            id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            content: accumulatedContent || 'No response received.',
             metadata: {
-              ...data.message.metadata,
-              airQualityData: data.airQualityData,
+              airQualityData,
             },
           };
         }
-        
-        // NOTE: Suggestions are no longer displayed as separate messages
-        // They were causing formatting issues with malformed markdown from AI responses
-        // The main AI response should contain all necessary information
         
         return newMessages;
       });
 
       // Extract health profile information from AI response if detected
-      if (data.message.content && !healthProfile) {
-        const hasHealthInfo = 
-          data.message.content.toLowerCase().includes('asthma') ||
-          data.message.content.toLowerCase().includes('copd') ||
-          data.message.content.toLowerCase().includes('respiratory');
+      if (accumulatedContent && !healthProfile) {
+        const hasHealthInfo =
+          accumulatedContent.toLowerCase().includes('asthma') ||
+          accumulatedContent.toLowerCase().includes('copd') ||
+          accumulatedContent.toLowerCase().includes('respiratory');
           
         if (hasHealthInfo) {
-          // Simple detection - could be enhanced with more sophisticated parsing
           const detectedProfile: HealthProfile = {
             hasRespiratoryCondition: true,
             conditions: ['User reported respiratory condition'],
@@ -322,23 +399,26 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       setError(errorMessage);
       setLastFailedMessage(message);
       
-      // Remove thinking message and add error message
+      // Update the streaming message to show error
       setMessages(prev => {
-        const newMessages = prev.filter(m => m.id !== thinkingMessage.id);
-        return [
-          ...newMessages,
-          {
+        const newMessages = [...prev];
+        const messageIndex = newMessages.findIndex(m => m.id === streamingMessageId);
+        
+        if (messageIndex !== -1) {
+          newMessages[messageIndex] = {
+            ...newMessages[messageIndex],
             id: `error-${Date.now()}`,
-            role: 'assistant',
             content: `Sorry, I encountered an error: ${errorMessage}. Please try again.`,
-            timestamp: new Date(),
-          },
-        ];
+          };
+        }
+        
+        return newMessages;
       });
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
     }
-  }, [sessionId, healthProfile, messages]);
+  }, [sessionId, healthProfile, messages, updateStreamingMessage]);
 
   const retryLastMessage = useCallback(async () => {
     if (lastFailedMessage) {
@@ -352,6 +432,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     healthProfile,
     isOpen,
     isLoading,
+    isStreaming,
     error,
     openChat,
     closeChat,

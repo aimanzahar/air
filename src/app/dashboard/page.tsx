@@ -962,7 +962,7 @@ export default function Home() {
                 co: air?.co ?? undefined,
                 o3: air?.o3 ?? undefined,
                 so2: air?.so2 ?? undefined,
-                aqi: risk.score,
+                aqi: air?.aqi ?? risk.score,
                 location: air?.location ?? "Current Location",
                 source: air?.source ?? "doe"
               },
@@ -985,7 +985,7 @@ export default function Home() {
                 lng: coords.lon,
                 name: air?.location ?? "Current Station",
                 location: air?.city ?? "Kuala Lumpur",
-                aqi: risk.score,
+                aqi: air?.aqi ?? risk.score,
                 pm25: air?.pm25,
                 no2: air?.no2,
                 co: air?.co

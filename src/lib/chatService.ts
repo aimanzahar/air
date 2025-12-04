@@ -58,6 +58,7 @@ class ChatService {
   private config: AIConfig;
   private airQualityCache = new Map<string, AirQualityContext>();
   private cacheTimeout = 5 * 60 * 1000; // 5 minutes
+  private apiTimeout = 45 * 1000; // 45 second timeout for AI API calls
 
   private openai: OpenAI;
 
@@ -135,19 +136,27 @@ Based on your respiratory condition status:
 Would you like to know about [follow-up suggestion]?"`;
   }
 
-  private async fetchAirQuality(lat: number, lng: number): Promise<AirQualityContext | null> {
+  // Get cached air quality data without fetching (non-blocking)
+  private getCachedAirQuality(lat: number, lng: number): AirQualityContext | null {
     const cacheKey = `${lat.toFixed(3)}-${lng.toFixed(3)}`;
     const cached = this.airQualityCache.get(cacheKey);
 
     if (cached) {
-      // Ensure timestamp is a Date object
       const timestamp = cached.timestamp instanceof Date ? cached.timestamp : new Date(cached.timestamp);
       if (Date.now() - timestamp.getTime() < this.cacheTimeout) {
-        return {
-          ...cached,
-          timestamp: timestamp
-        };
+        return { ...cached, timestamp };
       }
+    }
+    return null;
+  }
+
+  private async fetchAirQuality(lat: number, lng: number): Promise<AirQualityContext | null> {
+    const cacheKey = `${lat.toFixed(3)}-${lng.toFixed(3)}`;
+    
+    // Check cache first
+    const cached = this.getCachedAirQuality(lat, lng);
+    if (cached) {
+      return cached;
     }
 
     try {
@@ -282,13 +291,19 @@ Would you like to know about [follow-up suggestion]?"`;
       let completion: OpenAI.ChatCompletion | unknown = null;
       let aiMessage: string | undefined;
       
+      // Create abort controller for timeout
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), this.apiTimeout);
+      
       try {
         // First try with OpenAI SDK
         completion = await this.openai.chat.completions.create({
           model: this.config.model,
           messages: messages as OpenAI.ChatCompletionMessageParam[],
           temperature: 0.7,
-          max_tokens: 32768,
+          max_tokens: 4096,
+        }, {
+          signal: abortController.signal,
         });
 
         // Log the full response structure for debugging
@@ -340,8 +355,9 @@ Would you like to know about [follow-up suggestion]?"`;
             model: this.config.model,
             messages: messages,
             temperature: 0.7,
-            max_tokens: 32768,
+            max_tokens: 4096,
           }),
+          signal: abortController.signal,
         });
 
         if (!response.ok) {
@@ -410,6 +426,9 @@ Would you like to know about [follow-up suggestion]?"`;
       console.log('Successfully extracted AI message (first 200 chars):',
                   aiMessage.substring(0, 200) + (aiMessage.length > 200 ? '...' : ''));
 
+      // Clear timeout on success
+      clearTimeout(timeoutId);
+      
       // Parse recommendations from the response
       const recommendations = this.parseRecommendations(aiMessage);
       // Convert recommendations to string array for ChatResponse compatibility
@@ -434,6 +453,26 @@ Would you like to know about [follow-up suggestion]?"`;
       };
     } catch (error) {
       console.error('Error calling AI service:', error);
+      
+      // Check for timeout/abort error
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error('AI API call timed out after', this.apiTimeout / 1000, 'seconds');
+        const fallbackMessage: ChatMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          role: 'assistant',
+          content: "I'm sorry, my response is taking too long. Please try again with a simpler question, or check back in a moment.",
+          timestamp: new Date()
+        };
+
+        return {
+          message: fallbackMessage,
+          suggestions: [
+            "Try asking a shorter question",
+            "Check current air quality",
+            "Ask about health recommendations"
+          ]
+        };
+      }
       
       // Check if it's an OpenAI API error and log more details
       if (error instanceof OpenAI.APIError) {
@@ -473,6 +512,143 @@ Would you like to know about [follow-up suggestion]?"`;
   // Clear cache method
   clearCache(): void {
     this.airQualityCache.clear();
+  }
+
+  // Streaming method for real-time responses
+  async *streamMessage(request: ChatRequest): AsyncGenerator<{
+    type: 'chunk' | 'done' | 'error' | 'air_quality';
+    content?: string;
+    airQualityData?: AirQualityContext;
+    error?: string;
+  }, void, unknown> {
+    // Get air quality data - use cache for fast start, fetch in background for cache refresh
+    let airQualityData: AirQualityContext | null = null;
+    
+    if (request.location) {
+      // First, try to get cached data (non-blocking, instant)
+      airQualityData = this.getCachedAirQuality(request.location.lat, request.location.lng);
+      
+      if (airQualityData) {
+        // Yield cached air quality data immediately
+        yield { type: 'air_quality', airQualityData };
+      } else {
+        // Start background fetch to populate cache for next request (fire and forget)
+        // This won't block the stream start
+        this.fetchAirQuality(request.location.lat, request.location.lng)
+          .then(data => {
+            // Cache is automatically populated by fetchAirQuality
+            // Data will be available for subsequent requests
+            if (data) {
+              console.log('Air quality data fetched in background for:', request.location);
+            }
+          })
+          .catch(err => console.error('Background air quality fetch failed:', err));
+      }
+    }
+
+    // Prepare messages for AI
+    const messages: OpenAIMessage[] = [
+      {
+        role: 'system',
+        content: this.generateSystemPrompt(request.healthProfile, airQualityData)
+      }
+    ];
+
+    // Add conversation history (limit to last 10 messages)
+    const history = request.conversationHistory?.slice(-10) || [];
+    for (const msg of history) {
+      if (msg.role !== 'system') {
+        messages.push({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        });
+      }
+    }
+
+    // Add current message
+    messages.push({
+      role: 'user',
+      content: request.message
+    });
+
+    try {
+      if (!this.config.apiKey) {
+        throw new Error('AI service API key is not configured');
+      }
+
+      // Create abort controller for timeout
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), this.apiTimeout);
+
+      // Create streaming completion with timeout
+      const stream = await this.openai.chat.completions.create({
+        model: this.config.model,
+        messages: messages as OpenAI.ChatCompletionMessageParam[],
+        temperature: 0.7,
+        max_tokens: 4096,
+        stream: true,
+      }, {
+        signal: abortController.signal,
+      });
+
+      // Iterate over the stream and yield chunks
+      let hasContent = false;
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          hasContent = true;
+          yield { type: 'chunk', content };
+        }
+        
+        // Check for finish reason
+        if (chunk.choices[0]?.finish_reason === 'stop') {
+          clearTimeout(timeoutId);
+          yield { type: 'done' };
+          return;
+        }
+      }
+
+      // Clear timeout and ensure we send done if stream ends without explicit stop
+      clearTimeout(timeoutId);
+      yield { type: 'done' };
+
+    } catch (error) {
+      console.error('Error in streaming AI service:', error);
+      
+      // Check for timeout/abort error
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error('AI streaming timed out after', this.apiTimeout / 1000, 'seconds');
+        yield {
+          type: 'error',
+          error: 'Response timed out. Please try again with a simpler question.'
+        };
+        return;
+      }
+      
+      // Check if it's an OpenAI API error and log more details
+      if (error instanceof OpenAI.APIError) {
+        console.error('OpenAI API Error:', {
+          status: error.status,
+          message: error.message,
+          code: error.code,
+          type: error.type
+        });
+        yield {
+          type: 'error',
+          error: `API Error: ${error.message}`
+        };
+      } else if (error instanceof Error) {
+        yield {
+          type: 'error',
+          error: error.message
+        };
+      } else {
+        yield {
+          type: 'error',
+          error: 'An unexpected error occurred'
+        };
+      }
+    }
   }
 }
 

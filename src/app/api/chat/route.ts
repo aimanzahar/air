@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { chatService } from '@/lib/chatService';
 import type { ChatRequest, ChatResponse, ChatbotResponse } from '@/types/chat';
 
+// Type for streaming chunk
+interface StreamChunk {
+  type: 'chunk' | 'done' | 'error' | 'air_quality';
+  content?: string;
+  airQualityData?: any;
+  error?: string;
+}
+
 // Rate limiting store (in production, use Redis or a proper rate limiting solution)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
@@ -112,7 +120,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Call chat service
+    // Check if streaming is requested
+    const url = new URL(request.url);
+    const isStreaming = url.searchParams.get('stream') === 'true';
+
+    if (isStreaming) {
+      // Handle streaming response
+      const encoder = new TextEncoder();
+      
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            const streamGenerator = chatService.streamMessage(body as ChatRequest);
+            
+            for await (const chunk of streamGenerator) {
+              // Send as SSE format
+              const data = JSON.stringify(chunk);
+              controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+              
+              // If done or error, close the stream
+              if (chunk.type === 'done' || chunk.type === 'error') {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                controller.close();
+                return;
+              }
+            }
+            
+            // Ensure stream is closed if generator ends without done/error
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          } catch (error) {
+            console.error('Streaming error:', error);
+            const errorData = JSON.stringify({
+              type: 'error',
+              error: error instanceof Error ? error.message : 'Streaming failed'
+            });
+            controller.enqueue(encoder.encode(`data: ${errorData}\n\n`));
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // Non-streaming: Call chat service as before
     const response: ChatResponse = await chatService.sendMessage(body as ChatRequest);
 
     // Return the ChatResponse directly as expected by the frontend

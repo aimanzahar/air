@@ -1,10 +1,119 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatMessage, HealthProfile, AirQualityContext } from '@/types/chat';
 import { useChat } from '@/contexts/ChatContext';
 import './ChatWidget.css';
+
+// StreamingText component for typewriter animation effect
+interface StreamingTextProps {
+  content: string;
+  isStreaming: boolean;
+}
+
+const StreamingText: React.FC<StreamingTextProps> = ({ content, isStreaming }) => {
+  // Track the previously rendered content length
+  const previousLengthRef = useRef<number>(0);
+  // Track animated segments with unique keys
+  const [segments, setSegments] = useState<Array<{ text: string; key: string; isNew: boolean; index?: number }>>([]);
+  
+  useEffect(() => {
+    if (!isStreaming) {
+      // When streaming ends, reset and show all content as static
+      previousLengthRef.current = 0;
+      setSegments([{ text: content, key: 'final', isNew: false }]);
+      return;
+    }
+    
+    const prevLength = previousLengthRef.current;
+    const currentLength = content.length;
+    
+    if (currentLength > prevLength) {
+      // New content has arrived
+      const staticPart = content.slice(0, prevLength);
+      const newPart = content.slice(prevLength);
+      
+      // Create new segments - static part without animation, new part with animation
+      const newSegments: Array<{ text: string; key: string; isNew: boolean; index?: number }> = [];
+      
+      if (staticPart) {
+        newSegments.push({ text: staticPart, key: 'static', isNew: false });
+      }
+      
+      if (newPart) {
+        // Split new content by words/chunks for smoother animation
+        const words = newPart.split(/(\s+)/);
+        words.forEach((word, idx) => {
+          if (word) {
+            newSegments.push({
+              text: word,
+              key: `new-${prevLength}-${idx}-${Date.now()}`,
+              isNew: true,
+              index: idx,
+            });
+          }
+        });
+      }
+      
+      setSegments(newSegments);
+      previousLengthRef.current = currentLength;
+    }
+  }, [content, isStreaming]);
+  
+  // Reset when content is cleared
+  useEffect(() => {
+    if (!content) {
+      previousLengthRef.current = 0;
+      setSegments([]);
+    }
+  }, [content]);
+  
+  // Render with ReactMarkdown for the final static content, or animated spans during streaming
+  if (!isStreaming || segments.length === 0) {
+    return (
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="markdown-paragraph">{children}</p>,
+          strong: ({ children }) => <strong className="markdown-strong">{children}</strong>,
+          em: ({ children }) => <em className="markdown-em">{children}</em>,
+          ul: ({ children }) => <ul className="markdown-ul">{children}</ul>,
+          ol: ({ children }) => <ol className="markdown-ol">{children}</ol>,
+          li: ({ children }) => <li className="markdown-li">{children}</li>,
+          h1: ({ children }) => <h1 className="markdown-h1">{children}</h1>,
+          h2: ({ children }) => <h2 className="markdown-h2">{children}</h2>,
+          h3: ({ children }) => <h3 className="markdown-h3">{children}</h3>,
+          h4: ({ children }) => <h4 className="markdown-h4">{children}</h4>,
+          h5: ({ children }) => <h5 className="markdown-h5">{children}</h5>,
+          h6: ({ children }) => <h6 className="markdown-h6">{children}</h6>,
+          code: ({ children, className }) => {
+            const isInline = !className;
+            return isInline ?
+              <code className="markdown-code-inline">{children}</code> :
+              <code className="markdown-code-block">{children}</code>;
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
+  }
+  
+  // During streaming, render segments with animation
+  return (
+    <div className="streaming-content">
+      {segments.map((segment) => (
+        <span
+          key={segment.key}
+          className={segment.isNew ? 'typewriter-word' : 'typewriter-static'}
+          style={segment.isNew && segment.index !== undefined ? { animationDelay: `${segment.index * 50}ms` } : undefined}
+        >
+          {segment.text}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 interface LocationState {
   lat: number;
@@ -56,6 +165,7 @@ const ChatWidget: React.FC = () => {
     messages,
     isOpen,
     isLoading,
+    isStreaming,
     error,
     openChat,
     closeChat,
@@ -110,9 +220,19 @@ const ChatWidget: React.FC = () => {
   }, [healthProfile]);
 
   useEffect(() => {
-    // Auto-scroll to bottom when new messages arrive
+    // Auto-scroll to bottom when new messages arrive or content is streaming
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isStreaming]);
+
+  // Scroll more frequently during streaming
+  useEffect(() => {
+    if (isStreaming) {
+      const interval = setInterval(() => {
+        scrollToBottom();
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [isStreaming]);
 
   useEffect(() => {
     // Get user location on mount (only on client)
@@ -510,32 +630,51 @@ const ChatWidget: React.FC = () => {
           
           {messages
             .filter(message => message.content !== '...' && !message.id.includes('thinking'))
-            .map((message) => (
-            <div key={message.id} className={`message ${message.role}`}>
-              {message.role === 'assistant' && (
-                <div className="message-avatar">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
+            .map((message, index) => {
+              // Check if this is the last message and it's currently streaming
+              const isLastMessage = index === messages.filter(m => m.content !== '...' && !m.id.includes('thinking')).length - 1;
+              const isCurrentlyStreaming = isStreaming && isLastMessage && message.role === 'assistant';
+              
+              return (
+                <div key={message.id} className={`message ${message.role} ${isCurrentlyStreaming ? 'streaming' : ''}`}>
+                  {message.role === 'assistant' && (
+                    <div className="message-avatar">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                  )}
+                  <div className="message-bubble">
+                    <div className="message-content">
+                        {message.role === 'assistant' ? (
+                          isCurrentlyStreaming ? (
+                            <>
+                              <StreamingText content={message.content} isStreaming={true} />
+                              <span className="streaming-cursor">▊</span>
+                            </>
+                          ) : (
+                            <StreamingText content={message.content} isStreaming={false} />
+                          )
+                        ) : (
+                          formatMessage(message.content, false)
+                        )}
+                      </div>
+                    {message.metadata?.airQualityData && renderAirQualityBadge(message.metadata.airQualityData)}
+                    {!isCurrentlyStreaming && (
+                      <div className="message-timestamp">
+                        {formatTime(message.timestamp)}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-              <div className="message-bubble">
-                <div className="message-content">
-                  {formatMessage(message.content, message.role?.toString() === 'assistant')}
-                </div>
-                {message.metadata?.airQualityData && renderAirQualityBadge(message.metadata.airQualityData)}
-                <div className="message-timestamp">
-                  {formatTime(message.timestamp)}
-                </div>
-              </div>
-            </div>
-          ))}
+              );
+            })}
           
           {renderHealthPrompt()}
           
-          {isLoading && (
+          {isLoading && !isStreaming && (
             <div className="message assistant">
               <div className="message-avatar">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">

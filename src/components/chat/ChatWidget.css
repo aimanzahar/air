@@ -911,3 +911,69 @@
   word-break: break-word;
   margin: 8px 0;
 }
+
+/* Typewriter Animation for Streaming Words */
+@keyframes fadeInWord {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.typewriter-word {
+  display: inline;
+  animation: fadeInWord 0.35s ease-out forwards;
+}
+
+/* For already-displayed content (no animation) */
+.typewriter-static {
+  display: inline;
+}
+
+/* Container for streaming content */
+.streaming-content {
+  display: inline;
+  line-height: 1.5;
+}
+
+/* Streaming Cursor */
+.streaming-cursor {
+  display: inline-block;
+  color: var(--chat-primary);
+  animation: blink 1s step-end infinite;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Streaming Message State */
+.message.streaming .message-bubble {
+  position: relative;
+}
+
+.message.streaming .message-content {
+  min-height: 24px;
+}
+
+/* Empty streaming message placeholder */
+.message.streaming .message-content:empty::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: var(--chat-primary);
+  animation: blink 1s step-end infinite;
+  border-radius: 2px;
+}
