@@ -38,10 +38,31 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
+      getHourlyAverages: FunctionReference<
+        "query",
+        "internal",
+        { hours?: number; userKey: string },
+        any,
+        Name
+      >;
+      getLastReadingTimestamp: FunctionReference<
+        "query",
+        "internal",
+        { userKey: string },
+        any,
+        Name
+      >;
       getLocationHistory: FunctionReference<
         "query",
         "internal",
         { days?: number; locationName: string; userKey: string },
+        any,
+        Name
+      >;
+      getRecentReadings: FunctionReference<
+        "query",
+        "internal",
+        { minutes?: number; userKey: string },
         any,
         Name
       >;

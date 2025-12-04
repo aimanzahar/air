@@ -13,6 +13,7 @@ import {
   PlayIcon,
   PauseIcon,
   MapIcon,
+  CheckCircleIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { nanoid } from "nanoid";
@@ -39,6 +40,7 @@ import ChatWidget from "@/components/chat/ChatWidget";
 import ChatErrorBoundary from "@/components/chat/ChatErrorBoundary";
 import AirQualityComparison from "@/components/analytics/AirQualityComparison";
 import Navbar from "@/components/navigation/Navbar";
+import { formatTimeGMT8, formatDateTimeGMT8, formatDuration } from "@/lib/timeUtils";
 
 // Dynamically import the map to avoid SSR issues
 const AirQualityMap = dynamic(() => import("../../components/map/AirQualityMap"), {
@@ -114,10 +116,10 @@ const scoreAir = (air: AirData | null): {
 const formatValue = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : v.toFixed(1);
 
+// Use GMT+8 formatting from timeUtils to avoid hydration mismatch
 const formatTime = (iso?: string | null) => {
   if (!iso) return "—";
-  const d = new Date(iso);
-  return `${d.toLocaleDateString()} • ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return formatDateTimeGMT8(iso);
 };
 
 export default function Home() {
@@ -148,6 +150,14 @@ export default function Home() {
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   const zoomChangeTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
   
+  // Auto-refresh states (1 hour interval) - now based on Convex data
+  const AUTO_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastAutoRefreshDisplay, setLastAutoRefreshDisplay] = useState<string>('—');
+  const [timeUntilRefreshDisplay, setTimeUntilRefreshDisplay] = useState<string>('—');
+  const autoRefreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Area air quality states
   const [areaAirQuality, setAreaAirQuality] = useState<AreaAirQualitySummary | null>(null);
   const [nearbyStations, setNearbyStations] = useState<StationType[]>([]);
@@ -169,6 +179,12 @@ export default function Home() {
   );
   const insight = useQuery(
     api.passport.insights,
+    userKey ? { userKey } : "skip",
+  );
+  
+  // Query for last reading timestamp to determine if refresh is needed
+  const lastReadingInfo = useQuery(
+    api.airHistory.getLastReadingTimestamp,
     userKey ? { userKey } : "skip",
   );
 
@@ -224,7 +240,7 @@ export default function Home() {
       fetchAreaAirQuality(location.lat, location.lng);
     }
     
-    setStatus(`Tracking active • Last update: ${new Date().toLocaleTimeString()}`);
+    setStatus(`Tracking active • Last update: ${formatTimeGMT8(new Date())} (GMT+8)`);
   }, [showRadius]);
 
   const handleLocationError = useCallback((error: GeolocationPositionError) => {
@@ -335,8 +351,81 @@ export default function Home() {
   useEffect(() => {
     return () => {
       locationService.stopLocationTracking();
+      if (autoRefreshTimerRef.current) {
+        clearInterval(autoRefreshTimerRef.current);
+      }
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+      }
     };
   }, []);
+
+  // Smart auto-refresh based on Convex data - check if 1 hour has passed since last reading
+  useEffect(() => {
+    if (!autoRefreshEnabled || !userKey) return;
+    
+    // Function to check and refresh if needed
+    const checkAndRefresh = () => {
+      if (lastReadingInfo) {
+        // Update display values
+        if (lastReadingInfo.lastTimestamp) {
+          setLastAutoRefreshDisplay(formatTimeGMT8(lastReadingInfo.lastTimestamp));
+          setTimeUntilRefreshDisplay(formatDuration(lastReadingInfo.nextRefreshIn));
+        }
+        
+        // If an hour has passed, auto-refresh
+        if (lastReadingInfo.needsRefresh) {
+          console.log("[Smart Auto-Refresh] Hour passed since last reading, fetching new data...");
+          
+          if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+            fetchAir(coords.lat, coords.lon);
+            
+            if (showRadius) {
+              fetchAreaAirQuality(coords.lat, coords.lon);
+            }
+          }
+          
+          setStatus(`Auto-refreshed at ${formatTimeGMT8(new Date())} (GMT+8)`);
+        }
+      } else if (!lastReadingInfo) {
+        // No data yet, fetch immediately
+        console.log("[Smart Auto-Refresh] No previous readings, fetching initial data...");
+        if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+          fetchAir(coords.lat, coords.lon);
+        }
+      }
+    };
+
+    // Check immediately on mount/change
+    checkAndRefresh();
+    
+    // Check every minute if refresh is needed
+    checkIntervalRef.current = setInterval(() => {
+      checkAndRefresh();
+    }, 60000); // Check every minute
+
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+      }
+    };
+  }, [autoRefreshEnabled, userKey, lastReadingInfo, coords.lat, coords.lon, showRadius]);
+
+  // Helper function to get time until next refresh (uses Convex data)
+  const getTimeUntilRefresh = useCallback(() => {
+    if (lastReadingInfo?.nextRefreshIn !== undefined) {
+      if (lastReadingInfo.nextRefreshIn <= 0) return 'Refreshing...';
+      return formatDuration(lastReadingInfo.nextRefreshIn);
+    }
+    return timeUntilRefreshDisplay;
+  }, [lastReadingInfo, timeUntilRefreshDisplay]);
+
+  // Handle analytics auto-refresh callback
+  const handleAnalyticsRefresh = useCallback(() => {
+    if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+      fetchAir(coords.lat, coords.lon);
+    }
+  }, [coords.lat, coords.lon]);
 
   const fetchAir = async (lat: number, lon: number) => {
     setLoadingAir(true);
@@ -915,7 +1004,7 @@ export default function Home() {
               <div>
                 <p className="text-sm font-medium text-emerald-900">GPS Tracking Active</p>
                 <p className="text-xs text-emerald-700">
-                  Last update: {lastLocationUpdate ? lastLocationUpdate.toLocaleTimeString() : "Never"}
+                  Last update: {lastLocationUpdate ? formatTimeGMT8(lastLocationUpdate) : "Never"} (GMT+8)
                 </p>
                 <p className="text-xs text-emerald-700">
                   Location history: {locationHistory.length} points
@@ -1069,21 +1158,48 @@ export default function Home() {
                 Latest trips & health score
               </h2>
             </div>
-            <button
-              className="group inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-lg"
-              onClick={() => {
-                if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
-                  fetchAir(coords.lat, coords.lon);
-                } else {
-                  console.warn("[DEBUG] Dashboard - Invalid coords on refresh button, using fallback");
-                  fetchAir(fallback.lat, fallback.lon);
-                }
-              }}
-            >
-              <ArrowPathIcon className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
-              Refresh AQ
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Auto-Refresh Indicator */}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg text-xs">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoRefreshEnabled}
+                    onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                    className="rounded text-emerald-600 w-3.5 h-3.5"
+                  />
+                  <span className="text-slate-600">Auto (1hr)</span>
+                </label>
+                {autoRefreshEnabled && (
+                  <span className="text-sky-600 font-medium">
+                    Next: {getTimeUntilRefresh()}
+                  </span>
+                )}
+              </div>
+              <button
+                className="group inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition-all duration-300 hover:scale-105 hover:bg-slate-800 hover:shadow-lg"
+                onClick={() => {
+                  if (coords.lat && coords.lon && !isNaN(coords.lat) && !isNaN(coords.lon)) {
+                    fetchAir(coords.lat, coords.lon);
+                    setLastAutoRefreshDisplay(formatTimeGMT8(new Date()));
+                  } else {
+                    console.warn("[DEBUG] Dashboard - Invalid coords on refresh button, using fallback");
+                    fetchAir(fallback.lat, fallback.lon);
+                  }
+                }}
+              >
+                <ArrowPathIcon className="h-4 w-4 transition-transform duration-300 group-hover:rotate-180" />
+                Refresh
+              </button>
+            </div>
           </div>
+          
+          {/* Last refresh time indicator */}
+          <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+            <CheckCircleIcon className="h-3.5 w-3.5 text-emerald-500" />
+            <span>Last updated: {lastAutoRefreshDisplay} (GMT+8)</span>
+          </div>
+          
           <div className="mt-4 space-y-3">
             {(passport?.exposures ?? []).map((entry: ExposureEntry, index: number) => (
               <div
@@ -1095,7 +1211,7 @@ export default function Home() {
                     {entry.locationName}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {new Date(entry.timestamp).toLocaleString()} • {entry.mode ?? "unknown mode"}
+                    {formatDateTimeGMT8(entry.timestamp)} • {entry.mode ?? "unknown mode"}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-slate-600">
@@ -1249,6 +1365,7 @@ export default function Home() {
             currentSource={air?.source}
             passportTrend={insight?.trend}
             passportSampleCount={insight?.sampleCount}
+            onAutoRefresh={handleAnalyticsRefresh}
           />
         </section>
       )}

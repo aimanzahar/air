@@ -74,3 +74,32 @@ export const getStatsSummary = query({
     return await ctx.runQuery(components.air.airQualityHistory.getStatsSummary, args);
   },
 });
+
+export const getHourlyAverages = query({
+  args: {
+    userKey: v.string(),
+    hours: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.runQuery(components.air.airQualityHistory.getHourlyAverages, args);
+  },
+});
+
+export const getRecentReadings = query({
+  args: {
+    userKey: v.string(),
+    minutes: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.runQuery(components.air.airQualityHistory.getRecentReadings, args);
+  },
+});
+
+export const getLastReadingTimestamp = query({
+  args: {
+    userKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.runQuery(components.air.airQualityHistory.getLastReadingTimestamp, args);
+  },
+});

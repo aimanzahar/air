@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import {
-  LineChart,
   Line,
   BarChart,
   Bar,
@@ -19,8 +18,12 @@ import {
   PieChart,
   Pie,
   Cell,
+  ReferenceLine,
+  Brush,
+  ComposedChart,
 } from 'recharts';
 import './AirQualityComparison.css';
+import { formatTimeGMT8, formatDuration } from '@/lib/timeUtils';
 
 // Types for Convex query results
 interface DailyAverage {
@@ -28,6 +31,22 @@ interface DailyAverage {
   avgAqi: number;
   avgPm25: number | null;
   avgNo2: number | null;
+  readings: number;
+}
+
+interface HourlyAverage {
+  hour: string;
+  timestamp: number;
+  displayHour: string;
+  displayDate: string;
+  avgAqi: number;
+  minAqi: number | null;
+  maxAqi: number | null;
+  avgPm25: number | null;
+  avgNo2: number | null;
+  avgCo: number | null;
+  avgO3: number | null;
+  avgSo2: number | null;
   readings: number;
 }
 
@@ -46,6 +65,21 @@ interface TrendDataPoint {
   aqi: number;
   pm25: number | null;
   no2: number | null;
+  readings: number;
+}
+
+interface HourlyDataPoint {
+  hour: string;
+  displayLabel: string;
+  fullLabel: string;
+  aqi: number;
+  pm25: number | null;
+  no2: number | null;
+  co: number | null;
+  o3: number | null;
+  so2: number | null;
+  minAqi: number | null;
+  maxAqi: number | null;
   readings: number;
 }
 
@@ -75,10 +109,12 @@ interface AirQualityComparisonProps {
   currentSource?: string;
   passportTrend?: TrendDay[];
   passportSampleCount?: number;
+  onAutoRefresh?: () => void;
 }
 
-type TimeRange = '24h' | '7d' | '30d';
-type ChartType = 'trend' | 'comparison' | 'distribution';
+type TimeRange = '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
+type ChartType = 'trend' | 'hourly' | 'comparison' | 'distribution';
+type SortOrder = 'newest' | 'oldest' | 'highest' | 'lowest';
 
 const AQI_COLORS = {
   good: '#22c55e',
@@ -88,6 +124,14 @@ const AQI_COLORS = {
   veryUnhealthy: '#8b5cf6',
   hazardous: '#991b1b',
 };
+
+const AQI_THRESHOLDS = [
+  { value: 50, label: 'Good', color: AQI_COLORS.good },
+  { value: 100, label: 'Moderate', color: AQI_COLORS.moderate },
+  { value: 150, label: 'Unhealthy for Sensitive', color: AQI_COLORS.unhealthySensitive },
+  { value: 200, label: 'Unhealthy', color: AQI_COLORS.unhealthy },
+  { value: 300, label: 'Very Unhealthy', color: AQI_COLORS.veryUnhealthy },
+];
 
 const getAqiCategory = (aqi: number) => {
   if (aqi <= 50) return { label: 'Good', color: AQI_COLORS.good };
@@ -100,6 +144,42 @@ const getAqiCategory = (aqi: number) => {
 
 const getAqiColor = (aqi: number) => getAqiCategory(aqi).color;
 
+// Auto-refresh interval (1 hour in milliseconds)
+const AUTO_REFRESH_INTERVAL = 60 * 60 * 1000;
+
+// Custom tooltip for better readability - defined outside component
+interface TooltipProps {
+  active?: boolean;
+  payload?: Array<{ value: number; name: string; color: string }>;
+  label?: string;
+}
+
+const CustomTooltip = ({ active, payload, label }: TooltipProps) => {
+  if (!active || !payload || payload.length === 0) return null;
+  
+  return (
+    <div className="aq-custom-tooltip">
+      <p className="aq-tooltip-label">{label}</p>
+      {payload.map((entry, index) => (
+        <p key={index} className="aq-tooltip-entry" style={{ color: entry.color }}>
+          <span className="aq-tooltip-name">{entry.name}:</span>
+          <span className="aq-tooltip-value">
+            {entry.value}
+            {entry.name === 'AQI' && (
+              <span 
+                className="aq-tooltip-badge"
+                style={{ backgroundColor: getAqiColor(entry.value) }}
+              >
+                {getAqiCategory(entry.value).label}
+              </span>
+            )}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+};
+
 export default function AirQualityComparison({
   userKey,
   currentAqi,
@@ -110,21 +190,71 @@ export default function AirQualityComparison({
   currentNo2,
   currentSource,
   passportTrend,
-  passportSampleCount,
+  passportSampleCount: _passportSampleCount,
+  onAutoRefresh,
 }: AirQualityComparisonProps) {
-  const [timeRange, setTimeRange] = useState<TimeRange>('7d');
-  const [chartType, setChartType] = useState<ChartType>('trend');
+  const [timeRange, setTimeRange] = useState<TimeRange>('24h');
+  const [chartType, setChartType] = useState<ChartType>('hourly');
   const [isExpanded, setIsExpanded] = useState(true);
-
-  // Convex queries - using wrapper functions that expose air component
-  const days = timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : 30;
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date>(() => new Date());
+  const [nextRefreshTime, setNextRefreshTime] = useState<number>(() => Date.now() + AUTO_REFRESH_INTERVAL);
+  const [showPollutantDetails, setShowPollutantDetails] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   
+  // Suppress unused variable warning
+  void _passportSampleCount;
+
+  // Calculate query parameters based on time range
+  const getQueryParams = useCallback(() => {
+    switch (timeRange) {
+      case '1h': return { hours: 1, days: 1 };
+      case '6h': return { hours: 6, days: 1 };
+      case '12h': return { hours: 12, days: 1 };
+      case '24h': return { hours: 24, days: 1 };
+      case '7d': return { hours: 168, days: 7 };
+      case '30d': return { hours: 720, days: 30 };
+      default: return { hours: 24, days: 1 };
+    }
+  }, [timeRange]);
+
+  const { hours, days } = getQueryParams();
+  
+  // Convex queries
   const dailyAverages = useQuery(api.airHistory.getDailyAverages, { userKey, days }) as DailyAverage[] | undefined;
   const locationComparison = useQuery(api.airHistory.compareLocations, { userKey, days }) as LocationComparison[] | undefined;
   const statsSummary = useQuery(api.airHistory.getStatsSummary, { userKey });
+  const hourlyAverages = useQuery(api.airHistory.getHourlyAverages, { userKey, hours }) as HourlyAverage[] | undefined;
   
   // Mutation to store readings
   const storeReading = useMutation(api.airHistory.storeReading);
+
+  // Auto-refresh mechanism
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+
+    const refreshInterval = setInterval(() => {
+      setLastRefresh(new Date());
+      setNextRefreshTime(Date.now() + AUTO_REFRESH_INTERVAL);
+      
+      // Trigger parent refresh callback if provided
+      if (onAutoRefresh) {
+        onAutoRefresh();
+      }
+    }, AUTO_REFRESH_INTERVAL);
+
+    // Update countdown timer every minute to trigger re-render
+    const countdownInterval = setInterval(() => {
+      setNextRefreshTime(prev => prev); // Force re-render for countdown
+    }, 60000);
+
+    return () => {
+      clearInterval(refreshInterval);
+      clearInterval(countdownInterval);
+    };
+  }, [autoRefreshEnabled, onAutoRefresh]);
 
   // Store current reading when data is available
   useEffect(() => {
@@ -143,12 +273,48 @@ export default function AirQualityComparison({
     }
   }, [currentAqi, currentLocation, currentLat, currentLng, currentSource, currentPm25, currentNo2, userKey, storeReading]);
 
-  // Process data for charts - merge passport trend with air history data
+  // Process hourly data
+  const hourlyData: HourlyDataPoint[] = useMemo(() => {
+    if (!hourlyAverages) return [];
+    
+    let data = hourlyAverages.map((hour: HourlyAverage) => ({
+      hour: hour.hour,
+      displayLabel: hour.displayHour,
+      fullLabel: `${hour.displayDate} ${hour.displayHour}`,
+      aqi: hour.avgAqi,
+      pm25: hour.avgPm25,
+      no2: hour.avgNo2,
+      co: hour.avgCo,
+      o3: hour.avgO3,
+      so2: hour.avgSo2,
+      minAqi: hour.minAqi,
+      maxAqi: hour.maxAqi,
+      readings: hour.readings,
+    }));
+
+    // Sort based on selected order
+    switch (sortOrder) {
+      case 'newest':
+        data = data.sort((a, b) => b.hour.localeCompare(a.hour));
+        break;
+      case 'oldest':
+        data = data.sort((a, b) => a.hour.localeCompare(b.hour));
+        break;
+      case 'highest':
+        data = data.sort((a, b) => b.aqi - a.aqi);
+        break;
+      case 'lowest':
+        data = data.sort((a, b) => a.aqi - b.aqi);
+        break;
+    }
+
+    return data;
+  }, [hourlyAverages, sortOrder]);
+
+  // Process daily trend data
   const trendData: TrendDataPoint[] = useMemo(() => {
-    // Create a map to combine data from both sources by date
     const dataByDate: Record<string, TrendDataPoint> = {};
     
-    // Add data from dailyAverages (airQualityHistory)
     if (dailyAverages) {
       dailyAverages.forEach((day: DailyAverage) => {
         const dateKey = day.date;
@@ -163,19 +329,16 @@ export default function AirQualityComparison({
       });
     }
     
-    // Merge/override with passport trend data (exposures) - this is the "score" which maps to AQI-like values
     if (passportTrend) {
       passportTrend.forEach((day: TrendDay) => {
-        const dateKey = day.day; // format: YYYY-MM-DD
+        const dateKey = day.day;
         if (dataByDate[dateKey]) {
-          // Combine readings count, but use passport average as it has more samples
           dataByDate[dateKey] = {
             ...dataByDate[dateKey],
-            aqi: day.average, // Use passport score as it's more comprehensive
+            aqi: day.average,
             readings: dataByDate[dateKey].readings + day.samples,
           };
         } else {
-          // Add new entry from passport data
           dataByDate[dateKey] = {
             date: new Date(day.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
             fullDate: day.day,
@@ -188,7 +351,6 @@ export default function AirQualityComparison({
       });
     }
     
-    // Sort by date and return
     return Object.values(dataByDate).sort((a, b) => a.fullDate.localeCompare(b.fullDate));
   }, [dailyAverages, passportTrend]);
 
@@ -230,6 +392,98 @@ export default function AirQualityComparison({
 
   const stats = statsSummary;
 
+  // Calculate time until next refresh using GMT+8 consistent formatting
+  const getTimeUntilRefresh = useCallback(() => {
+    const diff = nextRefreshTime - Date.now();
+    if (diff <= 0) return 'Refreshing...';
+    return formatDuration(diff);
+  }, [nextRefreshTime]);
+
+  // Export to PDF handler
+  const handleExportPDF = useCallback(async () => {
+    setIsExporting(true);
+    setExportError(null);
+    
+    try {
+      // Prepare data for report
+      const reportData = {
+        userKey,
+        currentLocation: currentLocation || 'Unknown Location',
+        currentAqi: currentAqi || 0,
+        currentPm25: currentPm25,
+        currentNo2: currentNo2,
+        currentSource: currentSource,
+        stats: stats ? {
+          last24h: stats.last24h,
+          last7d: stats.last7d,
+          last30d: stats.last30d,
+          total: stats.total,
+        } : null,
+        hourlyData: hourlyData.map(d => ({
+          hour: d.hour,
+          displayLabel: d.displayLabel,
+          fullLabel: d.fullLabel,
+          aqi: d.aqi,
+          pm25: d.pm25,
+          no2: d.no2,
+        })),
+        dailyData: trendData.map(d => ({
+          date: d.fullDate,
+          aqi: d.aqi,
+          pm25: d.pm25,
+          no2: d.no2,
+          readings: d.readings,
+        })),
+        locationComparison: comparisonData.map(d => ({
+          locationName: d.fullName,
+          avgAqi: d.avgAqi,
+          minAqi: d.minAqi,
+          maxAqi: d.maxAqi,
+          readings: d.readings,
+        })),
+        aqiDistribution: distributionData,
+        timeRange,
+        generatedAt: new Date().toISOString(),
+      };
+
+      const response = await fetch('/api/report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(reportData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate report');
+      }
+
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().split('T')[0];
+      const locationName = (currentLocation || 'location').replace(/[^a-zA-Z0-9]/g, '_');
+      link.download = `AQI_Report_${locationName}_${timestamp}.html`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+    } catch (error) {
+      console.error('Export error:', error);
+      setExportError(error instanceof Error ? error.message : 'Failed to export report');
+    } finally {
+      setIsExporting(false);
+    }
+  }, [userKey, currentLocation, currentAqi, currentPm25, currentNo2, currentSource, stats, hourlyData, trendData, comparisonData, distributionData, timeRange]);
+
   if (!isExpanded) {
     return (
       <div className="aq-comparison-collapsed">
@@ -245,6 +499,11 @@ export default function AirQualityComparison({
           {stats?.last7d && (
             <span className="aq-mini-stat">
               7d avg: <strong style={{ color: getAqiColor(stats.last7d.avgAqi) }}>{stats.last7d.avgAqi}</strong>
+            </span>
+          )}
+          {autoRefreshEnabled && (
+            <span className="aq-mini-refresh">
+              🔄 {getTimeUntilRefresh()}
             </span>
           )}
         </button>
@@ -263,40 +522,91 @@ export default function AirQualityComparison({
             </svg>
             Air Quality Analytics
           </h3>
-          <p className="aq-subtitle">Historical data and trends</p>
+          <p className="aq-subtitle">Historical data, trends & hourly breakdown</p>
         </div>
+        <div className="aq-header-right">
+          <button 
+            className={`aq-export-btn ${isExporting ? 'exporting' : ''}`}
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            title="Export as PDF Report"
+          >
+            {isExporting ? (
+              <>
+                <svg className="aq-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="31.4 31.4" strokeLinecap="round">
+                    <animateTransform attributeName="transform" type="rotate" dur="1s" from="0 12 12" to="360 12 12" repeatCount="indefinite"/>
+                  </circle>
+                </svg>
+                Generating...
+              </>
+            ) : (
+              <>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M14 2V8H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M12 18V12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M9 15L12 18L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Export PDF
+              </>
+            )}
+          </button>
+          <div className="aq-auto-refresh">
+            <label className="aq-refresh-toggle">
+              <input
+                type="checkbox"
+                checked={autoRefreshEnabled}
+                onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+              />
+              <span className="aq-toggle-slider"></span>
+            </label>
+            <span className="aq-refresh-label">
+              Auto-refresh (1hr)
+              {autoRefreshEnabled && <span className="aq-next-refresh">Next: {getTimeUntilRefresh()}</span>}
+            </span>
+          </div>
+          <button 
+            className="aq-close-btn"
+            onClick={() => setIsExpanded(false)}
+            aria-label="Close analytics"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Last Refresh Indicator */}
+      <div className="aq-refresh-indicator">
+        <span className="aq-last-refresh">
+          Last updated: {formatTimeGMT8(lastRefresh)} (GMT+8)
+        </span>
         <button 
-          className="aq-close-btn"
-          onClick={() => setIsExpanded(false)}
-          aria-label="Close analytics"
+          className="aq-manual-refresh"
+          onClick={() => {
+            setLastRefresh(new Date());
+            setNextRefreshTime(Date.now() + AUTO_REFRESH_INTERVAL);
+            if (onAutoRefresh) onAutoRefresh();
+          }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 4V10H7M23 20V14H17M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14L18.36 18.36A9 9 0 0 1 3.51 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
+          Refresh Now
         </button>
       </div>
 
-      {/* Passport Trend Section - Last 7 Days */}
-      {passportTrend && passportTrend.length > 0 && (
-        <div className="aq-trend-section">
-          <div className="aq-trend-header">
-            <div>
-              <span className="aq-trend-label">Trend (Last 7 Days)</span>
-              <span className="aq-trend-avg">
-                Average score: {Math.round(passportTrend.reduce((acc, d) => acc + d.average, 0) / passportTrend.length)}
-              </span>
-            </div>
-            <span className="aq-trend-samples">Samples: {passportSampleCount ?? 0}</span>
-          </div>
-          <div className="aq-trend-grid">
-            {passportTrend.map((day) => (
-              <div key={day.day} className="aq-trend-day">
-                <span className="aq-trend-day-date">{new Date(day.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                <span className="aq-trend-day-value" style={{ color: getAqiColor(day.average) }}>{day.average}</span>
-                <span className="aq-trend-day-samples">{day.samples} samples</span>
-              </div>
-            ))}
-          </div>
+      {/* Export Error Message */}
+      {exportError && (
+        <div className="aq-export-error">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+            <path d="M12 8V12M12 16H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          <span>{exportError}</span>
+          <button onClick={() => setExportError(null)} className="aq-error-dismiss">×</button>
         </div>
       )}
 
@@ -362,6 +672,24 @@ export default function AirQualityComparison({
       <div className="aq-controls">
         <div className="aq-time-selector">
           <button 
+            className={timeRange === '1h' ? 'active' : ''} 
+            onClick={() => setTimeRange('1h')}
+          >
+            1h
+          </button>
+          <button 
+            className={timeRange === '6h' ? 'active' : ''} 
+            onClick={() => setTimeRange('6h')}
+          >
+            6h
+          </button>
+          <button 
+            className={timeRange === '12h' ? 'active' : ''} 
+            onClick={() => setTimeRange('12h')}
+          >
+            12h
+          </button>
+          <button 
             className={timeRange === '24h' ? 'active' : ''} 
             onClick={() => setTimeRange('24h')}
           >
@@ -382,9 +710,19 @@ export default function AirQualityComparison({
         </div>
         <div className="aq-chart-selector">
           <button 
+            className={chartType === 'hourly' ? 'active' : ''} 
+            onClick={() => setChartType('hourly')}
+            title="Hourly breakdown"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+              <path d="M12 6V12L16 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+          <button 
             className={chartType === 'trend' ? 'active' : ''} 
             onClick={() => setChartType('trend')}
-            title="Trend over time"
+            title="Daily trend"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M22 12H18L15 21L9 3L6 12H2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -412,13 +750,160 @@ export default function AirQualityComparison({
         </div>
       </div>
 
+      {/* Sort Controls - Only show for hourly view */}
+      {chartType === 'hourly' && (
+        <div className="aq-sort-controls">
+          <span className="aq-sort-label">Sort by:</span>
+          <div className="aq-sort-buttons">
+            <button 
+              className={sortOrder === 'newest' ? 'active' : ''} 
+              onClick={() => setSortOrder('newest')}
+            >
+              Newest First
+            </button>
+            <button 
+              className={sortOrder === 'oldest' ? 'active' : ''} 
+              onClick={() => setSortOrder('oldest')}
+            >
+              Oldest First
+            </button>
+            <button 
+              className={sortOrder === 'highest' ? 'active' : ''} 
+              onClick={() => setSortOrder('highest')}
+            >
+              Highest AQI
+            </button>
+            <button 
+              className={sortOrder === 'lowest' ? 'active' : ''} 
+              onClick={() => setSortOrder('lowest')}
+            >
+              Lowest AQI
+            </button>
+          </div>
+          <label className="aq-pollutant-toggle">
+            <input
+              type="checkbox"
+              checked={showPollutantDetails}
+              onChange={(e) => setShowPollutantDetails(e.target.checked)}
+            />
+            Show Pollutant Details
+          </label>
+        </div>
+      )}
+
       {/* Chart Area */}
       <div className="aq-chart-container">
+        {chartType === 'hourly' && (
+          <div className="aq-chart">
+            <h4>Hourly Air Quality Breakdown</h4>
+            {hourlyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={hourlyData}>
+                  <defs>
+                    <linearGradient id="aqiHourlyGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.05}/>
+                    </linearGradient>
+                    <linearGradient id="pm25Gradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis 
+                    dataKey="displayLabel" 
+                    tick={{ fontSize: 10 }}
+                    stroke="#9CA3AF"
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 11 }}
+                    stroke="#9CA3AF"
+                    domain={[0, 'auto']}
+                    label={{ value: 'AQI', angle: -90, position: 'insideLeft', style: { fontSize: 11 } }}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ paddingTop: '10px' }} />
+                  
+                  {/* AQI Threshold Reference Lines */}
+                  {AQI_THRESHOLDS.map((threshold) => (
+                    <ReferenceLine 
+                      key={threshold.value}
+                      y={threshold.value} 
+                      stroke={threshold.color} 
+                      strokeDasharray="5 5"
+                      strokeOpacity={0.5}
+                      label={{ 
+                        value: threshold.label, 
+                        position: 'right',
+                        fontSize: 9,
+                        fill: threshold.color,
+                      }}
+                    />
+                  ))}
+                  
+                  <Area 
+                    type="monotone" 
+                    dataKey="aqi" 
+                    stroke="#3B82F6" 
+                    fill="url(#aqiHourlyGradient)"
+                    strokeWidth={2}
+                    name="AQI"
+                    dot={{ fill: '#3B82F6', strokeWidth: 0, r: 3 }}
+                    activeDot={{ r: 6, fill: '#3B82F6', stroke: '#fff', strokeWidth: 2 }}
+                  />
+                  
+                  {showPollutantDetails && (
+                    <>
+                      {hourlyData.some(d => d.pm25) && (
+                        <Line 
+                          type="monotone" 
+                          dataKey="pm25" 
+                          stroke="#10B981" 
+                          strokeWidth={2}
+                          dot={false}
+                          name="PM2.5"
+                        />
+                      )}
+                      {hourlyData.some(d => d.no2) && (
+                        <Line 
+                          type="monotone" 
+                          dataKey="no2" 
+                          stroke="#F59E0B" 
+                          strokeWidth={2}
+                          dot={false}
+                          name="NO₂"
+                        />
+                      )}
+                    </>
+                  )}
+                  
+                  {hourlyData.length > 12 && (
+                    <Brush 
+                      dataKey="displayLabel" 
+                      height={30} 
+                      stroke="#3B82F6"
+                      fill="#F1F5F9"
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="aq-no-data">
+                <p>No hourly data available for this time range</p>
+                <p className="aq-no-data-hint">Data is collected automatically every hour!</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {chartType === 'trend' && (
           <div className="aq-chart">
-            <h4>AQI Trend</h4>
+            <h4>Daily AQI Trend</h4>
             {trendData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={280}>
                 <AreaChart data={trendData}>
                   <defs>
                     <linearGradient id="aqiGradient" x1="0" y1="0" x2="0" y2="1">
@@ -437,20 +922,14 @@ export default function AirQualityComparison({
                     stroke="#9CA3AF"
                     domain={[0, 'auto']}
                   />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#fff', 
-                      border: '1px solid #E5E7EB',
-                      borderRadius: '8px',
-                      fontSize: '12px'
-                    }}
-                    formatter={(value: number, name: string) => {
-                      if (name === 'aqi') return [value, 'AQI'];
-                      if (name === 'pm25') return [value ? `${value} μg/m³` : 'N/A', 'PM2.5'];
-                      return [value, name];
-                    }}
-                  />
+                  <Tooltip content={<CustomTooltip />} />
                   <Legend />
+                  
+                  {/* AQI Threshold Reference Lines */}
+                  <ReferenceLine y={50} stroke={AQI_COLORS.good} strokeDasharray="3 3" strokeOpacity={0.5} />
+                  <ReferenceLine y={100} stroke={AQI_COLORS.moderate} strokeDasharray="3 3" strokeOpacity={0.5} />
+                  <ReferenceLine y={150} stroke={AQI_COLORS.unhealthySensitive} strokeDasharray="3 3" strokeOpacity={0.5} />
+                  
                   <Area 
                     type="monotone" 
                     dataKey="aqi" 
@@ -458,6 +937,8 @@ export default function AirQualityComparison({
                     fill="url(#aqiGradient)"
                     strokeWidth={2}
                     name="AQI"
+                    dot={{ fill: '#3B82F6', strokeWidth: 0, r: 4 }}
+                    activeDot={{ r: 6, fill: '#3B82F6', stroke: '#fff', strokeWidth: 2 }}
                   />
                   {trendData.some(d => d.pm25) && (
                     <Line 
@@ -484,7 +965,7 @@ export default function AirQualityComparison({
           <div className="aq-chart">
             <h4>Location Comparison</h4>
             {comparisonData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={comparisonData} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis type="number" tick={{ fontSize: 11 }} stroke="#9CA3AF" />
@@ -532,7 +1013,7 @@ export default function AirQualityComparison({
           <div className="aq-chart">
             <h4>Air Quality Distribution</h4>
             {distributionData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
                   <Pie
                     data={distributionData}
@@ -542,6 +1023,8 @@ export default function AirQualityComparison({
                     outerRadius={90}
                     paddingAngle={5}
                     dataKey="value"
+                    label={({ name, value }) => `${(name ?? '').split(' ')[0]}: ${value}`}
+                    labelLine={true}
                   >
                     {distributionData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
@@ -572,6 +1055,81 @@ export default function AirQualityComparison({
             )}
           </div>
         )}
+      </div>
+
+      {/* Hourly Data Table - For detailed view */}
+      {chartType === 'hourly' && hourlyData.length > 0 && (
+        <div className="aq-hourly-table">
+          <h4>Hourly Readings Detail</h4>
+          <div className="aq-table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>AQI</th>
+                  <th>Status</th>
+                  {showPollutantDetails && (
+                    <>
+                      <th>PM2.5</th>
+                      <th>NO₂</th>
+                      <th>CO</th>
+                    </>
+                  )}
+                  <th>Readings</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hourlyData.slice(0, 12).map((hour, index) => (
+                  <tr key={index}>
+                    <td className="aq-table-time">{hour.fullLabel}</td>
+                    <td>
+                      <span 
+                        className="aq-table-aqi"
+                        style={{ backgroundColor: getAqiColor(hour.aqi), color: '#fff' }}
+                      >
+                        {hour.aqi}
+                      </span>
+                    </td>
+                    <td>
+                      <span 
+                        className="aq-table-status"
+                        style={{ color: getAqiColor(hour.aqi) }}
+                      >
+                        {getAqiCategory(hour.aqi).label}
+                      </span>
+                    </td>
+                    {showPollutantDetails && (
+                      <>
+                        <td>{hour.pm25 ?? '—'}</td>
+                        <td>{hour.no2 ?? '—'}</td>
+                        <td>{hour.co ?? '—'}</td>
+                      </>
+                    )}
+                    <td>{hour.readings}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* AQI Legend */}
+      <div className="aq-legend">
+        <h5>AQI Index Guide</h5>
+        <div className="aq-legend-items">
+          {AQI_THRESHOLDS.map((threshold) => (
+            <div key={threshold.value} className="aq-legend-item">
+              <span 
+                className="aq-legend-color" 
+                style={{ backgroundColor: threshold.color }}
+              ></span>
+              <span className="aq-legend-label">
+                {threshold.label} (0-{threshold.value})
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Location List */}

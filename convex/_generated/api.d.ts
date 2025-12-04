@@ -67,10 +67,28 @@ export declare const components: {
         { days?: number; userKey: string },
         any
       >;
+      getHourlyAverages: FunctionReference<
+        "query",
+        "internal",
+        { hours?: number; userKey: string },
+        any
+      >;
+      getLastReadingTimestamp: FunctionReference<
+        "query",
+        "internal",
+        { userKey: string },
+        any
+      >;
       getLocationHistory: FunctionReference<
         "query",
         "internal",
         { days?: number; locationName: string; userKey: string },
+        any
+      >;
+      getRecentReadings: FunctionReference<
+        "query",
+        "internal",
+        { minutes?: number; userKey: string },
         any
       >;
       getStatsSummary: FunctionReference<

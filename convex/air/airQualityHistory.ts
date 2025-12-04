@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
-// Store air quality reading
+// Store air quality reading with hour tracking
 export const storeReading = mutation({
   args: {
     userKey: v.string(),
@@ -36,7 +36,7 @@ export const storeReading = mutation({
       return recentReadings[0]._id;
     }
     
-    // Store the new reading
+    // Store the new reading with hour tracking
     const id = await ctx.db.insert("airQualityHistory", {
       userKey: args.userKey,
       lat: args.lat,
@@ -275,6 +275,181 @@ export const getStatsSummary = query({
       last7d: calculateStats(last7dReadings),
       last30d: calculateStats(last30dReadings),
       total: calculateStats(allReadings),
+    };
+  },
+});
+
+// Get hourly averages for detailed analysis
+export const getHourlyAverages = query({
+  args: {
+    userKey: v.string(),
+    hours: v.optional(v.number()), // Last N hours, default 24
+  },
+  handler: async (ctx, args) => {
+    const hoursBack = args.hours || 24;
+    const cutoffTime = Date.now() - (hoursBack * 60 * 60 * 1000);
+    
+    const readings = await ctx.db
+      .query("airQualityHistory")
+      .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
+      .filter((q) => q.gt(q.field("timestamp"), cutoffTime))
+      .collect();
+    
+    // Group by hour
+    const hourlyData: Record<string, {
+      hour: string;
+      timestamp: number;
+      readings: number;
+      totalAqi: number;
+      totalPm25: number;
+      totalNo2: number;
+      totalCo: number;
+      totalO3: number;
+      totalSo2: number;
+      pm25Count: number;
+      no2Count: number;
+      coCount: number;
+      o3Count: number;
+      so2Count: number;
+      minAqi: number;
+      maxAqi: number;
+    }> = {};
+    
+    readings.forEach((reading) => {
+      const date = new Date(reading.timestamp);
+      const hourKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}T${String(date.getHours()).padStart(2, '0')}`;
+      
+      if (!hourlyData[hourKey]) {
+        hourlyData[hourKey] = {
+          hour: hourKey,
+          timestamp: reading.timestamp,
+          readings: 0,
+          totalAqi: 0,
+          totalPm25: 0,
+          totalNo2: 0,
+          totalCo: 0,
+          totalO3: 0,
+          totalSo2: 0,
+          pm25Count: 0,
+          no2Count: 0,
+          coCount: 0,
+          o3Count: 0,
+          so2Count: 0,
+          minAqi: Infinity,
+          maxAqi: -Infinity,
+        };
+      }
+      hourlyData[hourKey].readings++;
+      hourlyData[hourKey].totalAqi += reading.aqi;
+      hourlyData[hourKey].minAqi = Math.min(hourlyData[hourKey].minAqi, reading.aqi);
+      hourlyData[hourKey].maxAqi = Math.max(hourlyData[hourKey].maxAqi, reading.aqi);
+      
+      if (reading.pm25) {
+        hourlyData[hourKey].totalPm25 += reading.pm25;
+        hourlyData[hourKey].pm25Count++;
+      }
+      if (reading.no2) {
+        hourlyData[hourKey].totalNo2 += reading.no2;
+        hourlyData[hourKey].no2Count++;
+      }
+      if (reading.co) {
+        hourlyData[hourKey].totalCo += reading.co;
+        hourlyData[hourKey].coCount++;
+      }
+      if (reading.o3) {
+        hourlyData[hourKey].totalO3 += reading.o3;
+        hourlyData[hourKey].o3Count++;
+      }
+      if (reading.so2) {
+        hourlyData[hourKey].totalSo2 += reading.so2;
+        hourlyData[hourKey].so2Count++;
+      }
+    });
+    
+    // Calculate averages and format
+    return Object.values(hourlyData)
+      .map((hour) => ({
+        hour: hour.hour,
+        timestamp: hour.timestamp,
+        displayHour: new Date(hour.timestamp).toLocaleTimeString('en-US', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: true 
+        }),
+        displayDate: new Date(hour.timestamp).toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric' 
+        }),
+        avgAqi: Math.round(hour.totalAqi / hour.readings),
+        minAqi: hour.minAqi === Infinity ? null : hour.minAqi,
+        maxAqi: hour.maxAqi === -Infinity ? null : hour.maxAqi,
+        avgPm25: hour.pm25Count > 0 ? Math.round(hour.totalPm25 / hour.pm25Count) : null,
+        avgNo2: hour.no2Count > 0 ? Math.round((hour.totalNo2 / hour.no2Count) * 10) / 10 : null,
+        avgCo: hour.coCount > 0 ? Math.round((hour.totalCo / hour.coCount) * 100) / 100 : null,
+        avgO3: hour.o3Count > 0 ? Math.round(hour.totalO3 / hour.o3Count) : null,
+        avgSo2: hour.so2Count > 0 ? Math.round(hour.totalSo2 / hour.so2Count) : null,
+        readings: hour.readings,
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  },
+});
+
+// Get recent readings for live updates (last N minutes)
+export const getRecentReadings = query({
+  args: {
+    userKey: v.string(),
+    minutes: v.optional(v.number()), // Last N minutes, default 60
+  },
+  handler: async (ctx, args) => {
+    const minutesBack = args.minutes || 60;
+    const cutoffTime = Date.now() - (minutesBack * 60 * 1000);
+    
+    const readings = await ctx.db
+      .query("airQualityHistory")
+      .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
+      .filter((q) => q.gt(q.field("timestamp"), cutoffTime))
+      .order("desc")
+      .take(100);
+    
+    return readings.map(r => ({
+      ...r,
+      displayTime: new Date(r.timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      }),
+    }));
+  },
+});
+
+// Get the last reading timestamp for a user to check if refresh is needed
+export const getLastReadingTimestamp = query({
+  args: {
+    userKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const lastReading = await ctx.db
+      .query("airQualityHistory")
+      .withIndex("by_userKey", (q) => q.eq("userKey", args.userKey))
+      .order("desc")
+      .first();
+    
+    if (!lastReading) {
+      return null;
+    }
+    
+    const now = Date.now();
+    const lastTimestamp = lastReading.timestamp;
+    const hourInMs = 60 * 60 * 1000;
+    const timeSinceLastReading = now - lastTimestamp;
+    const needsRefresh = timeSinceLastReading >= hourInMs;
+    
+    return {
+      lastTimestamp,
+      timeSinceLastReading,
+      needsRefresh,
+      nextRefreshIn: Math.max(0, hourInMs - timeSinceLastReading),
     };
   },
 });
