@@ -90,6 +90,8 @@ const config: AIConfig = {
 const openai = new OpenAI({
   apiKey: config.apiKey,
   baseURL: `${config.baseUrl}/v1`,
+  timeout: 30000, // 30 second timeout to prevent 504 gateway timeout
+  maxRetries: 2, // Retry up to 2 times on transient errors
 });
 
 async function fetchAirQuality(lat: number, lng: number): Promise<AirQualityData | null> {
@@ -124,146 +126,88 @@ function generateHealthPrompt(airQuality: AirQualityData | null, healthProfile?:
   const hour = now.getHours();
   const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
   const timeOfDay = hour < 6 ? 'early morning' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night';
-  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
   const season = now.getMonth() < 3 || now.getMonth() === 11 ? 'winter' : now.getMonth() < 6 ? 'spring' : now.getMonth() < 9 ? 'summer' : 'autumn';
-  
-  // Random factors to encourage variety
-  const randomSeed = Math.random().toString(36).substring(7);
-  const focusAreas = ['respiratory health', 'cardiovascular impact', 'outdoor activities', 'indoor air quality', 'exercise timing', 'commute safety'];
-  const randomFocus = focusAreas[Math.floor(Math.random() * focusAreas.length)];
-  const insightStyles = ['practical tips', 'scientific insights', 'preventive measures', 'health optimization', 'risk awareness'];
-  const randomStyle = insightStyles[Math.floor(Math.random() * insightStyles.length)];
 
   const aqData = airQuality ? `
-Current Air Quality Data:
-- Location: ${airQuality.location}
-- AQI: ${airQuality.aqi}
-- PM2.5: ${airQuality.pm25} μg/m³
-- NO₂: ${airQuality.no2} ppb
-- CO: ${airQuality.co} ppm
-- O₃: ${airQuality.o3} ppb
-- SO₂: ${airQuality.so2} ppb
-` : 'No current air quality data available.';
+Air Quality: AQI=${airQuality.aqi}, PM2.5=${airQuality.pm25}μg/m³, NO2=${airQuality.no2}ppb, CO=${airQuality.co}ppm, O3=${airQuality.o3}ppb, SO2=${airQuality.so2}ppb
+Location: ${airQuality.location}` : 'No air quality data available.';
 
   const userContext = healthProfile ? `
-User Health Profile:
-- Name: ${healthProfile.name || 'Not specified'}
-- Age group: ${healthProfile.age || 'Not specified'}
-- Gender: ${healthProfile.gender || 'Not specified'}
-- Has respiratory condition: ${healthProfile.hasRespiratoryCondition || false}
-- Respiratory conditions: ${healthProfile.conditions?.join(', ') || 'None specified'}
-- Condition severity: ${healthProfile.conditionSeverity || 'Not specified'}
-- Activity level: ${healthProfile.activityLevel || 'Not specified'}
-- Daily outdoor exposure: ${healthProfile.outdoorExposure || 'Not specified'}
-- Smoking status: ${healthProfile.smokingStatus || 'Not specified'}
-- Lives near traffic: ${healthProfile.livesNearTraffic || false}
-- Has air purifier: ${healthProfile.hasAirPurifier || false}
-- Is pregnant: ${healthProfile.isPregnant || false}
-- Has heart condition: ${healthProfile.hasHeartCondition || false}
-- Current medications: ${healthProfile.medications?.join(', ') || 'None specified'}
-` : '';
+User: ${healthProfile.name || 'Anonymous'}, Age: ${healthProfile.age || 'unknown'}, Activity: ${healthProfile.activityLevel || 'moderate'}
+Conditions: ${healthProfile.hasRespiratoryCondition ? healthProfile.conditions?.join(', ') || 'respiratory issues' : 'none'}
+Outdoor exposure: ${healthProfile.outdoorExposure || 'moderate'}` : '';
 
-  const timeContext = `
-Current Context:
-- Day: ${dayOfWeek}
-- Time of day: ${timeOfDay} (${hour}:${String(now.getMinutes()).padStart(2, '0')})
-- Weekend: ${isWeekend ? 'Yes' : 'No'}
-- Season: ${season}
-- Analysis focus: ${randomFocus}
-- Insight style preference: ${randomStyle}
-- Request ID: ${randomSeed}
-`;
-
-  return `You are an AI health analyst specializing in air quality and respiratory health predictions. Based on the following data, generate a UNIQUE and comprehensive health analysis.
+  return `You are an AI health analyst. Based on the data below, generate a concise health analysis as JSON.
 
 ${aqData}
 ${userContext}
-${timeContext}
+Current time: ${dayOfWeek} ${timeOfDay}, ${season}
 
-IMPORTANT: Generate fresh, varied insights each time. Consider the current time of day, day of week, and seasonal factors. Focus particularly on "${randomFocus}" with "${randomStyle}" style insights. Avoid generic or repetitive advice - be specific to the current conditions and context.
+${healthProfile?.name ? `Personalize for ${healthProfile.name} with conditions: ${healthProfile.conditions?.join(', ') || 'none'}.` : ''}
 
-${healthProfile ? `
-PERSONALIZATION REQUIREMENTS:
-1. Address the user by name if provided: "${healthProfile.name}"
-2. Tailor recommendations specifically to their health conditions:
-   - If they have respiratory conditions (${healthProfile.conditions?.join(', ')}), provide specific advice for managing these conditions with current air quality
-   - Consider their activity level ("${healthProfile.activityLevel}") when recommending outdoor activities
-   - Factor in their outdoor exposure level ("${healthProfile.outdoorExposure}") for risk assessment
-   - If they live near traffic (${healthProfile.livesNearTraffic}), provide specific advice about traffic-related pollution
-   - Consider air purifier usage (${healthProfile.hasAirPurifier}) in indoor air quality recommendations
-   - If pregnant (${healthProfile.isPregnant}), provide pregnancy-specific health guidance
-   - If heart condition (${healthProfile.hasHeartCondition}), include cardiovascular health considerations
-   - Account for smoking status ("${healthProfile.smokingStatus}") in health risk assessment
-   - Consider medications (${healthProfile.medications?.join(', ')}) when providing health advice
-3. Generate highly personalized actionable steps based on their specific health profile and current conditions
-` : ''}
-
-Generate a JSON response with the following structure (respond ONLY with valid JSON, no markdown):
+Respond with ONLY this JSON structure (no markdown):
 {
-  "healthScore": <number 0-100, higher is better>,
-  "exposureReduction": <number, percentage change from typical exposure>,
-  "insights": [
-    {
-      "id": "<unique id>",
-      "type": "<warning|tip|prediction|achievement>",
-      "title": "<short title>",
-      "description": "<detailed description>",
-      "confidence": <number 0-100, optional>,
-      "actionable": "<specific action to take, optional>"
-    }
-  ],
-  "pollutantPredictions": [
-    {
-      "name": "<PM2.5|NO₂|O₃|CO>",
-      "current": <current value>,
-      "predicted": <predicted value for next 24h>,
-      "unit": "<μg/m³|ppb|ppm>",
-      "trend": "<up|down|stable>",
-      "riskLevel": "<low|moderate|high>"
-    }
-  ],
-  "vulnerableGroups": [
-    {
-      "group": "<group name - can include: Children, Elderly, Pregnant Women, Asthma/COPD Patients, Heart Disease Patients, Outdoor Workers, Athletes, etc.>",
-      "icon": "<appropriate emoji>",
-      "risk": "<low|moderate|high based on current AQI and pollutant levels>",
-      "recommendation": "<UNIQUE, specific, actionable recommendation for this group based on current conditions and time of day>"
-    }
-  ]
-}
-
-Guidelines:
-1. Health score should reflect current AQI (AQI 0-50 = score 80-100, AQI 51-100 = score 60-79, AQI 101-150 = score 40-59, AQI 151+ = score below 40) - add small random variation (±5)
-2. Generate 3-5 UNIQUE insights based on current conditions - vary the types (warning, tip, prediction, achievement) and focus areas each time
-3. For pollutantPredictions: Use the ACTUAL current values from the air quality data provided. Predict trends considering the EXACT time of day - morning rush hour increases NO2/CO, afternoon sun increases O3, evening decreases, night is usually lowest
-4. For vulnerableGroups: Generate 4-6 DIFFERENT groups each time. Vary which groups you include - don't always use the same 4. Provide SPECIFIC, context-aware, UNIQUE recommendations based on current AQI, time of day, and pollutant levels. Each recommendation should be different and actionable.
-5. Be realistic with confidence scores (70-90% range typically) - vary them based on data quality
-6. CRUCIAL: Make each response completely unique - use different wording, focus on different aspects, provide varied actionable advice
-7. Consider: Is it a good time for outdoor exercise? Should people use air purifiers? Are there upcoming weather patterns to consider?
-8. Include time-specific advice (e.g., "Since it's ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, consider...")
-9. IMPORTANT: The pollutant "current" values in pollutantPredictions MUST match the actual data provided. Only "predicted" values should be estimates.
-
-Respond ONLY with the JSON object, no additional text or markdown formatting.`;
+  "healthScore": <0-100, based on AQI: 0-50=80-100, 51-100=60-79, 101-150=40-59>,
+  "exposureReduction": <percentage 5-30>,
+  "insights": [<3 objects with: id, type(warning|tip|prediction), title, description, actionable>],
+  "pollutantPredictions": [<4 objects for PM2.5/NO2/O3/CO with: name, current, predicted, unit, trend(up|down|stable), riskLevel(low|moderate|high)>],
+  "vulnerableGroups": [<4 objects with: group, icon(emoji), risk(low|moderate|high), recommendation>]
+}`;
 }
 
 function parseAIResponse(content: string): Partial<HealthPredictionResponse> {
   try {
     // Try to extract JSON from the response
     let jsonStr = content;
-    
+
     // Remove markdown code blocks if present
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       jsonStr = jsonMatch[1];
     }
-    
+
     // Try to find JSON object in the string
     const jsonStartIndex = jsonStr.indexOf('{');
     const jsonEndIndex = jsonStr.lastIndexOf('}');
     if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
       jsonStr = jsonStr.substring(jsonStartIndex, jsonEndIndex + 1);
     }
-    
+
+    // Try to repair truncated JSON by closing open brackets
+    let repaired = jsonStr;
+    const openBrackets = (repaired.match(/\[/g) || []).length;
+    const closeBrackets = (repaired.match(/\]/g) || []).length;
+    const openBraces = (repaired.match(/\{/g) || []).length;
+    const closeBraces = (repaired.match(/\}/g) || []).length;
+
+    // Add missing closing brackets/braces
+    for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += ']';
+    for (let i = 0; i < openBraces - closeBraces; i++) repaired += '}';
+
+    // Try parsing repaired JSON
+    try {
+      const parsed = JSON.parse(repaired);
+      return parsed;
+    } catch {
+      // If still failing, try removing last incomplete element
+      const lastComma = repaired.lastIndexOf(',');
+      if (lastComma > 0) {
+        const truncated = repaired.substring(0, lastComma);
+        // Re-close brackets
+        let fixed = truncated;
+        const ob = (fixed.match(/\[/g) || []).length;
+        const cb = (fixed.match(/\]/g) || []).length;
+        const obr = (fixed.match(/\{/g) || []).length;
+        const cbr = (fixed.match(/\}/g) || []).length;
+        for (let i = 0; i < ob - cb; i++) fixed += ']';
+        for (let i = 0; i < obr - cbr; i++) fixed += '}';
+
+        const parsed = JSON.parse(fixed);
+        console.log('[AI-Health] ⚠️ JSON was truncated but successfully repaired');
+        return parsed;
+      }
+    }
+
     const parsed = JSON.parse(jsonStr);
     return parsed;
   } catch (error) {
@@ -467,31 +411,91 @@ export async function POST(request: NextRequest) {
       // Generate AI predictions
       console.log('[AI-Health] Generating AI prompt...');
       const prompt = generateHealthPrompt(airQuality, profile);
+      const promptLength = prompt.length;
+      console.log(`[AI-Health] Prompt generated: ${promptLength} characters`);
 
       console.log(`[AI-Health] 🤖 Calling AI model: ${config.model}`);
-      console.log(`[AI-Health] Base URL: ${config.baseUrl}`);
+      console.log(`[AI-Health] Base URL: ${config.baseUrl}/v1`);
+      console.log(`[AI-Health] Streaming enabled, Timeout: 60s`);
       const aiStartTime = Date.now();
       
-      const completion = await openai.chat.completions.create({
-        model: config.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a health AI that responds only with valid JSON. Never include markdown formatting or explanation text. Generate unique, varied responses each time - avoid repetitive or generic advice.'
-          },
-          {
-            role: 'user',
-            content: prompt
+      let aiContent = '';
+      try {
+        // Create AbortController for timeout enforcement (60 seconds for streaming)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+          console.log('[AI-Health] ⏱️ Forcibly aborting request due to 60-second timeout');
+          controller.abort();
+        }, 60000);
+
+        console.log('[AI-Health] 📡 Starting streaming request...');
+
+        // Use streaming for faster response
+        const stream = await openai.chat.completions.create({
+          model: config.model,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a health AI that responds only with valid JSON. Never include markdown formatting or explanation text. Generate unique, varied responses each time - avoid repetitive or generic advice.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 4096, // Increased to prevent truncation
+          stream: true, // Enable streaming
+        }, {
+          signal: controller.signal
+        });
+
+        // Collect streamed chunks
+        let chunkCount = 0;
+        const firstChunkTime = Date.now();
+        let gotFirstChunk = false;
+
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || '';
+          if (content) {
+            if (!gotFirstChunk) {
+              console.log(`[AI-Health] ⚡ First chunk received in ${Date.now() - aiStartTime}ms`);
+              gotFirstChunk = true;
+            }
+            aiContent += content;
+            chunkCount++;
           }
-        ],
-        temperature: 0.85,
-        max_tokens: 4096,
-      });
 
-      const aiDuration = Date.now() - aiStartTime;
-      console.log(`[AI-Health] ✅ AI response received in ${aiDuration}ms`);
+          // Check finish reason
+          if (chunk.choices[0]?.finish_reason) {
+            console.log(`[AI-Health] Finish reason: ${chunk.choices[0].finish_reason}`);
+          }
+        }
 
-      const aiContent = completion.choices[0]?.message?.content;
+        // Clear the timeout if request completes successfully
+        clearTimeout(timeoutId);
+
+        const aiDuration = Date.now() - aiStartTime;
+        console.log(`[AI-Health] ✅ Streaming complete in ${aiDuration}ms (${chunkCount} chunks)`);
+
+      } catch (apiError: unknown) {
+        const aiDuration = Date.now() - aiStartTime;
+        const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown error';
+        const errorName = apiError instanceof Error ? apiError.name : 'UnknownError';
+        console.error(`[AI-Health] ❌ API call failed after ${aiDuration}ms`);
+        console.error(`[AI-Health] Error name: ${errorName}`);
+        console.error(`[AI-Health] Error message: ${errorMessage}`);
+
+        // Handle AbortError specifically (our custom timeout)
+        if (errorName === 'AbortError' || errorMessage.includes('aborted') || errorMessage.includes('timeout')) {
+          console.error(`[AI-Health] ⏱️ Request aborted or timed out`);
+          const timeoutError = new Error('Request timed out');
+          timeoutError.name = 'AbortTimeoutError';
+          throw timeoutError;
+        }
+
+        throw apiError;
+      }
       
       if (!aiContent) {
         console.warn('[AI-Health] ⚠️ No AI content received, using default response');
@@ -524,8 +528,20 @@ export async function POST(request: NextRequest) {
       console.log(`[AI-Health] ✅ Success! Total time: ${Date.now() - startTime}ms`);
       console.log('==========================================\n');
       return NextResponse.json(response);
-    } catch (aiError) {
-      console.error('[AI-Health] ❌ AI prediction error:', aiError);
+    } catch (aiError: unknown) {
+      const errorMessage = aiError instanceof Error ? aiError.message : 'Unknown error';
+      const errorStack = aiError instanceof Error ? aiError.stack : '';
+      const errorName = aiError instanceof Error ? aiError.name : 'UnknownError';
+      
+      // Check if this is our custom timeout error
+      if (errorName === 'AbortTimeoutError') {
+        console.error('[AI-Health] ⏱️ API request exceeded 25-second timeout');
+        console.log('[AI-Health] Falling back to default response due to timeout');
+      } else {
+        console.error('[AI-Health] ❌ AI prediction error:', errorMessage);
+        console.error('[AI-Health] Error stack:', errorStack);
+      }
+      
       console.log(`[AI-Health] Falling back to default response. Total time: ${Date.now() - startTime}ms`);
       console.log('==========================================\n');
       return NextResponse.json(getDefaultResponse(airQuality));
