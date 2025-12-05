@@ -1,3 +1,22 @@
+/**
+ * Chat Service
+ * 
+ * AI-powered chat service for NafasLokal air quality assistant.
+ * Provides personalized health recommendations based on:
+ * - Current air quality data
+ * - User health profile (respiratory conditions, age, etc.)
+ * - Location-based pollution levels
+ * 
+ * Features:
+ * - OpenAI/GPT integration with configurable models
+ * - Context-aware responses with air quality data
+ * - Health-focused recommendations for vulnerable groups
+ * - Caching for air quality context
+ * - Timeout handling for API calls
+ * 
+ * @module chatService
+ */
+
 import type {
   ChatMessage,
   ChatRequest,
@@ -9,17 +28,20 @@ import type {
 import type { AirQualityStation } from '@/types/airQuality';
 import OpenAI from 'openai';
 
+/** AI configuration interface */
 interface AIConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
 }
 
+/** OpenAI message format */
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
+/** OpenAI API response structure */
 interface OpenAIResponse {
   choices: Array<{
     message: {
@@ -40,7 +62,7 @@ interface OpenAIResponse {
   };
 }
 
-// Extended interface for thinking model responses
+/** Extended interface for thinking model responses (e.g., GPT-4) */
 interface ThinkingModelChoice {
   message?: {
     content?: string;
@@ -54,22 +76,32 @@ interface ThinkingModelChoice {
   text?: string;
 }
 
+/**
+ * ChatService - Main service class for AI chat functionality
+ * 
+ * Handles all AI chat interactions including:
+ * - Message processing and response generation
+ * - Air quality context injection
+ * - Health profile-based recommendations
+ */
 class ChatService {
   private config: AIConfig;
   private airQualityCache = new Map<string, AirQualityContext>();
-  private cacheTimeout = 5 * 60 * 1000; // 5 minutes
+  private cacheTimeout = 5 * 60 * 1000; // 5 minutes cache for air quality data
   private apiTimeout = 45 * 1000; // 45 second timeout for AI API calls
 
   private openai: OpenAI;
 
   constructor() {
+    // Initialize AI configuration from environment variables
+    // Supports multiple AI providers (OpenAI, Gemini, etc.)
     this.config = {
       baseUrl: process.env.OPENAI_BASE_URL || process.env.GEMINI_BASE_URL || process.env.NEXT_PUBLIC_GEMINI_BASE_URL || 'https://apipro.maynor1024.live',
       apiKey: process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
       model: process.env.OPENAI_MODEL || process.env.GEMINI_MODEL || 'gemini-3-pro-preview-11-2025'
     };
 
-    // Initialize OpenAI client with custom base URL
+    // Initialize OpenAI client with custom base URL for flexibility
     this.openai = new OpenAI({
       apiKey: this.config.apiKey,
       baseURL: `${this.config.baseUrl}/v1`,

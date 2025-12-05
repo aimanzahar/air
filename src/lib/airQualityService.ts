@@ -1,3 +1,22 @@
+/**
+ * Air Quality Service
+ * 
+ * This service handles all air quality data fetching, processing, and caching.
+ * It integrates with multiple data sources:
+ * - DOE Malaysia (Department of Environment)
+ * - WAQI (World Air Quality Index)
+ * - OpenAQ (Open Air Quality)
+ * 
+ * Features:
+ * - Multi-source data fusion with priority ranking
+ * - Intelligent caching with configurable timeouts
+ * - Request debouncing to prevent API overload
+ * - Area-based air quality summaries
+ * - Station clustering for map visualization
+ * 
+ * @module airQualityService
+ */
+
 import type {
   AirQualityStation,
   AirQualityData,
@@ -12,13 +31,21 @@ import type {
 } from '../types/airQuality';
 import type { Location } from './locationService';
 
-// Cache configuration
+// Cache configuration - 5 minutes default for air quality data freshness
 const DEFAULT_CACHE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const cache = new Map<string, CacheEntry<any>>();
 
-// Debounce timers
+// Debounce timers for preventing rapid consecutive API calls
 const debounceTimers = new Map<string, NodeJS.Timeout>();
 
+/**
+ * AirQualityService - Main service class for air quality data operations
+ * 
+ * Provides methods for:
+ * - Fetching air quality data by location (radius or bounding box)
+ * - Computing area summaries with risk levels
+ * - Caching and debouncing for performance optimization
+ */
 class AirQualityService {
   private config = {
     doe: {

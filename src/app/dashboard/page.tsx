@@ -1,3 +1,24 @@
+/**
+ * Dashboard Page
+ * 
+ * The main dashboard of NafasLokal application displaying:
+ * - Real-time air quality data with interactive map
+ * - Location-based exposure scoring and risk levels
+ * - AI-powered health recommendations
+ * - Exposure history tracking and trends
+ * - Healthcare facility finder
+ * - AI Chat widget for personalized assistance
+ * 
+ * Features:
+ * - Multi-source air quality data (DOE, WAQI, OpenAQ)
+ * - Automatic location detection with fallback
+ * - Auto-refresh with configurable intervals
+ * - Gamification integration (points, streaks)
+ * - Responsive design for mobile and desktop
+ * 
+ * @page Dashboard
+ */
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
@@ -43,12 +64,13 @@ import HealthcareFinder from "@/components/healthcare/HealthcareFinder";
 import Navbar from "@/components/navigation/Navbar";
 import { formatTimeGMT8, formatDateTimeGMT8, formatDuration } from "@/lib/timeUtils";
 
-// Dynamically import the map to avoid SSR issues
+// Dynamically import the map to avoid SSR issues with Leaflet
 const AirQualityMap = dynamic(() => import("../../components/map/AirQualityMap"), {
   ssr: false,
   loading: () => <div className="h-96 bg-gray-100 animate-pulse rounded-2xl"></div>,
 });
 
+/** Air quality data structure from APIs */
 type AirData = {
   location: string;
   city?: string;
@@ -65,8 +87,10 @@ type AirData = {
   source?: "waqi" | "openaq" | "doe" | "error";
 };
 
+/** Risk level classification */
 type RiskLevel = "low" | "moderate" | "high" | "loading";
 
+/** User exposure entry for tracking */
 type ExposureEntry = {
   _id: string;
   locationName: string;
@@ -78,14 +102,22 @@ type ExposureEntry = {
   riskLevel: "low" | "moderate" | "high" | string;
 };
 
+/** Trend data point for charts */
 type TrendPoint = { day: string; average: number; samples: number };
 
+// Default fallback location (Kuala Lumpur city center)
 const fallback = {
   lat: 3.139,
   lon: 101.6869,
   label: "Kuala Lumpur (fallback)",
 };
 
+/**
+ * Calculate air quality score and risk level
+ * Based on PM2.5, NO2, and CO concentrations
+ * @param air - Air quality data
+ * @returns Score (0-100), risk level, and narrative description
+ */
 const scoreAir = (air: AirData | null): {
   score: number;
   level: RiskLevel;
